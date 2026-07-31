@@ -42,13 +42,10 @@ st.set_page_config(
 st.title("📈 Asset Allocation Tracker")
 st.caption("Asset allocation tracking with support for manual & live assets.")
 
-# --- 1. PRIVATE DATA SOURCE ---
-st.subheader("1. Portfolio & Holdings")
-
+# --- CARICAMENTO DATI (IN BACKGROUND SILENZIOSO) ---
 if "PORTFOLIO" in st.secrets:
     csv_data = st.secrets["PORTFOLIO"]
     df = pd.read_csv(io.StringIO(csv_data))
-    st.success("🔒 Portfolio data loaded safely from private Secrets.")
 else:
     uploaded_file = st.file_uploader("Upload an Excel file (Optional)", type=["xlsx"])
     if uploaded_file is not None:
@@ -65,7 +62,6 @@ else:
             "Prezzo_Fisso": [None, None, None, None, 20000.0]
         }
         df = pd.DataFrame(default_data)
-        st.info("💡 Using sample data. Set up Secrets or upload an Excel file.")
 
 # --- DATA SANITIZATION ---
 df.columns = df.columns.astype(str).str.strip()
@@ -90,7 +86,7 @@ if "Prezzo_Fisso" not in df.columns:
 else:
     df["Prezzo_Fisso"] = pd.to_numeric(df["Prezzo_Fisso"], errors="coerce").fillna(0.0)
 
-# --- 2. LIVE PRICES & MANUAL PRICE OVERRIDE ---
+# --- LIVE PRICES & MANUAL PRICE OVERRIDE ---
 @st.cache_data(ttl=300)
 def get_live_prices(tickers):
     prices = {}
@@ -122,7 +118,7 @@ df['Prezzo_Finale'] = df.apply(
 
 df['Valore_Attuale'] = df['Quantita'] * df['Prezzo_Finale']
 
-# --- 3. CATEGORY AGGREGATION & SORTING ---
+# --- CATEGORY AGGREGATION & SORTING ---
 cat_df = df.groupby('Categoria', as_index=False).agg({
     'Valore_Attuale': 'sum',
     'Target_Pct': 'sum'
@@ -136,9 +132,9 @@ cat_df['Scostamento_%'] = cat_df['Peso_Attuale_%'] - cat_df['Target_Pct']
 # Ordina in ordine crescente per Delta % (Scostamento_%)
 cat_df = cat_df.sort_values(by='Scostamento_%', ascending=True).reset_index(drop=True)
 
-# --- 4. DISPLAY KPI ---
+# --- DISPLAY KPI ---
 st.divider()
-st.subheader("2. Portfolio Summary")
+st.subheader("Portfolio Summary")
 
 col1, col2 = st.columns(2)
 col1.metric("Current Portfolio Value", f"€ {valore_totale:,.2f}")
@@ -151,13 +147,12 @@ if not cat_df.empty:
         f"{most_underweight['Scostamento_%']:+.2f}%"
     )
 
-# --- 5. CATEGORY BREAKDOWN TABLE ---
-st.subheader("3. Asset Class Scenarios & Allocation")
+# --- CATEGORY BREAKDOWN TABLE ---
+st.subheader("Asset Class Allocation")
 
 display_cat = cat_df.copy()
 display_cat['Valore (€)'] = display_cat['Valore_Attuale'].apply(lambda x: f"€ {x:,.2f}")
 display_cat['Peso Att.'] = display_cat['Peso_Attuale_%'].apply(lambda x: f"{x:.2f}%")
-display_cat['Target'] = display_cat['Target_Pct'].apply(lambda x: f"{x:.1f}%")
 display_cat['Delta %'] = display_cat['Scostamento_%'].apply(lambda x: f"{x:+.2f}%")
 
 def color_delta(val):
@@ -171,16 +166,19 @@ def color_delta(val):
         pass
     return ''
 
-styler = display_cat[['Categoria', 'Valore (€)', 'Peso Att.', 'Target', 'Delta %']].style
+styler = display_cat[['Categoria', 'Valore (€)', 'Peso Att.', 'Delta %']].style
 
 if hasattr(styler, 'map'):
     styled_cat = styler.map(color_delta, subset=['Delta %'])
 else:
     styled_cat = styler.applymap(color_delta, subset=['Delta %'])
 
-st.dataframe(styled_cat, use_container_width=True, hide_index=True)
+# Calcolo dinamico dell'altezza per adattare la tabella ed evitare la barra di scorrimento
+table_height = (len(display_cat) + 1) * 35 + 10
 
-# --- 6. DETAILED POSITIONS EXPANDER ---
+st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table_height)
+
+# --- DETAILED POSITIONS EXPANDER ---
 with st.expander("🔍 Show Detailed Holdings"):
     df_detail = df[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Prezzo_Finale', 'Valore_Attuale', 'Is_Primary']].copy()
     df_detail['Unit Price'] = df_detail['Prezzo_Finale'].apply(lambda x: f"€ {x:,.2f}")
