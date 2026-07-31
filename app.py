@@ -1,8 +1,10 @@
-import streamlit as st
+import io
+import os
 import pandas as pd
+import streamlit as st
 import yfinance as yf
 
-# Configurazione Pagina (Mobile Friendly)
+# Configurazione Pagina
 st.set_page_config(
     page_title="Rebalance Tracker",
     page_icon="📈",
@@ -13,29 +15,33 @@ st.set_page_config(
 st.title("📈 Asset Allocation Tracker")
 st.caption("Visualizza in tempo reale lo scostamento degli ETF dal target allocation.")
 
-# --- 1. FONTE DATI ---
+# --- 1. FONTE DATI PRIVATA ---
 st.subheader("1. Portafoglio e Liquidità")
 
-uploaded_file = st.file_uploader("Carica il tuo file 'portafoglio.xlsx' (Opzionale)", type=["xlsx"])
-
-if uploaded_file is not None:
-    df = pd.read_excel(uploaded_file)
+# Controllo se esistono dati privati nei Secrets di Streamlit Cloud
+if "PORTFOLIO" in st.secrets:
+    csv_data = st.secrets["PORTFOLIO"]
+    df = pd.read_csv(io.StringIO(csv_data))
+    st.success("🔒 Dati portafoglio caricati in modo sicuro dai Secrets privati.")
 else:
-    # Dati di default se non viene caricato alcun file
-    default_data = {
-        "Ticker": ["VWCE.DE", "AGGH.MI", "MEUD.PA"],
-        "Nome Asset": ["Vanguard All-World", "iShares Global Aggregate", "Amundi Europe 600"],
-        "Quantita": [250, 1800, 120],
-        "Target_Pct": [60.0, 30.0, 10.0]
-    }
-    df = pd.DataFrame(default_data)
-    st.info("💡 Stai usando i dati di esempio. Carica il tuo file Excel sopra per personalizzare.")
+    uploaded_file = st.file_uploader("Carica un file Excel (Opzionale)", type=["xlsx"])
+    if uploaded_file is not None:
+        df = pd.read_excel(uploaded_file)
+    else:
+        # Dati di esempio generici (solo se non ci sono Secrets nè file caricati)
+        default_data = {
+            "Ticker": ["VWCE.DE", "AGGH.MI", "MEUD.PA"],
+            "Nome Asset": ["Vanguard All-World", "iShares Global Aggregate", "Amundi Europe 600"],
+            "Quantita": [250, 1800, 120],
+            "Target_Pct": [60.0, 30.0, 10.0]
+        }
+        df = pd.DataFrame(default_data)
+        st.info("💡 Stai usando i dati di esempio. Inserisci i Secrets o carica un file Excel.")
 
-# Possibilità di modificare la liquidità disponibile
 cash_injection = st.number_input("Nuova Liquidità da aggiungere (€)", min_value=0.0, value=1000.0, step=100.0)
 
 # --- 2. RECUPERO PREZZI LIVE ---
-@st.cache_data(ttl=300)  # Cache per 5 minuti per evitare troppe richieste
+@st.cache_data(ttl=300)
 def get_live_prices(tickers):
     prices = {}
     for ticker in tickers:
@@ -62,9 +68,8 @@ valore_totale = df['Valore_Attuale'].sum()
 valore_futuro = valore_totale + cash_injection
 
 df['Peso_Attuale_%'] = (df['Valore_Attuale'] / valore_totale * 100) if valore_totale > 0 else 0
-df['Scostamento_%'] = df['Peso_Attuale_%'] - df['Target_Pct']  # Negativo = Sottopesato, Positivo = Sovrapesato
+df['Scostamento_%'] = df['Peso_Attuale_%'] - df['Target_Pct']
 
-# Target in Euro considerando la nuova liquidità
 df['Valore_Target_€'] = valore_futuro * (df['Target_Pct'] / 100)
 df['Deficit_€'] = df['Valore_Target_€'] - df['Valore_Attuale']
 
@@ -80,7 +85,6 @@ col2.metric("Valore Post-Versamento", f"€ {valore_futuro:,.2f}")
 st.subheader("3. Scostamento dal Target Allocation")
 
 display_df = df.copy()
-
 display_df['Prezzo Live'] = display_df['Prezzo_Live'].apply(lambda x: f"€ {x:,.2f}")
 display_df['Valore (€)'] = display_df['Valore_Attuale'].apply(lambda x: f"€ {x:,.2f}")
 display_df['Peso Att.'] = display_df['Peso_Attuale_%'].apply(lambda x: f"{x:.2f}%")
@@ -88,7 +92,6 @@ display_df['Target'] = display_df['Target_Pct'].apply(lambda x: f"{x:.1f}%")
 display_df['Delta %'] = display_df['Scostamento_%'].apply(lambda x: f"{x:+.2f}%")
 display_df['Deficit / Surplus (€)'] = display_df['Deficit_€'].apply(lambda x: f"€ {x:,.2f}" if x > 0 else f"- € {abs(x):,.2f}")
 
-# Funzione per evidenziare chi è sottopesato (rosso) e sovrapesato (verde)
 def color_delta(val):
     try:
         num = float(str(val).replace('%', ''))
@@ -100,7 +103,6 @@ def color_delta(val):
         pass
     return ''
 
-# Gestione della compatibilità con nuove e vecchie versioni di Pandas
 styler = display_df[['Ticker', 'Nome Asset', 'Prezzo Live', 'Peso Att.', 'Target', 'Delta %', 'Deficit / Surplus (€)']].style
 
 if hasattr(styler, 'map'):
