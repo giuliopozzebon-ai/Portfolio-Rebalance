@@ -1,3 +1,8 @@
+import io
+import pandas as pd
+import streamlit as st
+import yfinance as yf
+
 # --- CONTROLLO ACCESSO CON PASSWORD ---
 def check_password():
     if "PASSWORD" not in st.secrets:
@@ -25,10 +30,6 @@ if not check_password():
     st.stop()
 # -------------------------------------
 
-import io
-import pandas as pd
-import streamlit as st
-import yfinance as yf
 
 # Page Configuration
 st.set_page_config(
