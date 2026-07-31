@@ -40,6 +40,7 @@ st.set_page_config(
 )
 
 st.title("📈 Asset Allocation Tracker")
+st.caption("Asset allocation tracking with support for manual & live assets.")
 
 # --- CARICAMENTO DATI (IN BACKGROUND SILENZIOSO) ---
 if "PORTFOLIO" in st.secrets:
@@ -127,6 +128,7 @@ valore_totale = cat_df['Valore_Attuale'].sum()
 
 cat_df['Peso_Attuale_%'] = (cat_df['Valore_Attuale'] / valore_totale * 100) if valore_totale > 0 else 0
 cat_df['Scostamento_%'] = cat_df['Peso_Attuale_%'] - cat_df['Target_Pct']
+cat_df['Delta_Euro'] = valore_totale * (cat_df['Scostamento_%'] / 100)
 
 # Ordina in ordine crescente per Delta % (Scostamento_%)
 cat_df = cat_df.sort_values(by='Scostamento_%', ascending=True).reset_index(drop=True)
@@ -153,6 +155,9 @@ display_cat = cat_df.copy()
 display_cat['Valore (€)'] = display_cat['Valore_Attuale'].apply(lambda x: f"€ {x:,.2f}")
 display_cat['Peso Att.'] = display_cat['Peso_Attuale_%'].apply(lambda x: f"{x:.2f}%")
 display_cat['Delta %'] = display_cat['Scostamento_%'].apply(lambda x: f"{x:+.2f}%")
+display_cat['Delta (€)'] = display_cat['Delta_Euro'].apply(
+    lambda x: f"+ € {x:,.2f}" if x > 0 else (f"- € {abs(x):,.2f}" if x < 0 else "€ 0.00")
+)
 
 def color_delta(val):
     try:
@@ -165,7 +170,7 @@ def color_delta(val):
         pass
     return ''
 
-styler = display_cat[['Categoria', 'Valore (€)', 'Peso Att.', 'Delta %']].style
+styler = display_cat[['Categoria', 'Valore (€)', 'Peso Att.', 'Delta %', 'Delta (€)']].style
 
 if hasattr(styler, 'map'):
     styled_cat = styler.map(color_delta, subset=['Delta %'])
