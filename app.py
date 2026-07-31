@@ -31,7 +31,7 @@ else:
     df = pd.DataFrame(default_data)
     st.info("💡 Stai usando i dati di esempio. Carica il tuo file Excel sopra per personalizzare.")
 
-# Possibilità di inserire la liquidità mensile
+# Possibilità di modificare la liquidità disponibile
 cash_injection = st.number_input("Nuova Liquidità da aggiungere (€)", min_value=0.0, value=1000.0, step=100.0)
 
 # --- 2. RECUPERO PREZZI LIVE ---
@@ -80,6 +80,7 @@ col2.metric("Valore Post-Versamento", f"€ {valore_futuro:,.2f}")
 st.subheader("3. Scostamento dal Target Allocation")
 
 display_df = df.copy()
+
 display_df['Prezzo Live'] = display_df['Prezzo_Live'].apply(lambda x: f"€ {x:,.2f}")
 display_df['Valore (€)'] = display_df['Valore_Attuale'].apply(lambda x: f"€ {x:,.2f}")
 display_df['Peso Att.'] = display_df['Peso_Attuale_%'].apply(lambda x: f"{x:.2f}%")
@@ -87,10 +88,10 @@ display_df['Target'] = display_df['Target_Pct'].apply(lambda x: f"{x:.1f}%")
 display_df['Delta %'] = display_df['Scostamento_%'].apply(lambda x: f"{x:+.2f}%")
 display_df['Deficit / Surplus (€)'] = display_df['Deficit_€'].apply(lambda x: f"€ {x:,.2f}" if x > 0 else f"- € {abs(x):,.2f}")
 
-# Funzione per evidenziare il delta (rosso se sottopesato, verde se sovrapesato)
+# Funzione per evidenziare chi è sottopesato (rosso) e sovrapesato (verde)
 def color_delta(val):
     try:
-        num = float(val.replace('%', ''))
+        num = float(str(val).replace('%', ''))
         if num < -1.0:
             return 'background-color: #fce8e6; color: #a50e0e; font-weight: bold;'
         elif num > 1.0:
@@ -99,7 +100,13 @@ def color_delta(val):
         pass
     return ''
 
-styled_df = display_df[['Ticker', 'Nome Asset', 'Prezzo Live', 'Peso Att.', 'Target', 'Delta %', 'Deficit / Surplus (€)']].style.applymap(color_delta, subset=['Delta %'])
+# Gestione della compatibilità con nuove e vecchie versioni di Pandas
+styler = display_df[['Ticker', 'Nome Asset', 'Prezzo Live', 'Peso Att.', 'Target', 'Delta %', 'Deficit / Surplus (€)']].style
+
+if hasattr(styler, 'map'):
+    styled_df = styler.map(color_delta, subset=['Delta %'])
+else:
+    styled_df = styler.applymap(color_delta, subset=['Delta %'])
 
 st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
@@ -118,5 +125,10 @@ if max_deficit_row['Deficit_€'] > 0:
 else:
     st.info("Tutti gli asset sono perfettamente bilanciati o sopra il target.")
 
+st.caption("Pulsante di aggiornamento manuale dati:")
 if st.button("🔄 Ricarica Prezzi Live"):
     st.cache_data.clear()
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        st.experimental_rerun()
