@@ -43,7 +43,7 @@ st.title("📈 Asset Allocation Tracker")
 st.caption("Asset allocation tracking with support for manual & live assets.")
 
 # --- 1. PRIVATE DATA SOURCE ---
-st.subheader("1. Portfolio & Cash")
+st.subheader("1. Portfolio & Holdings")
 
 if "PORTFOLIO" in st.secrets:
     csv_data = st.secrets["PORTFOLIO"]
@@ -90,14 +90,11 @@ if "Prezzo_Fisso" not in df.columns:
 else:
     df["Prezzo_Fisso"] = pd.to_numeric(df["Prezzo_Fisso"], errors="coerce").fillna(0.0)
 
-cash_injection = st.number_input("New Cash Injection (€)", min_value=0.0, value=1000.0, step=100.0)
-
 # --- 2. LIVE PRICES & MANUAL PRICE OVERRIDE ---
 @st.cache_data(ttl=300)
 def get_live_prices(tickers):
     prices = {}
     for ticker in tickers:
-        # Skip fetching if ticker is manual or empty
         if not ticker or str(ticker).upper() in ["MANUAL", "NONE", "NAN", "CASH"]:
             prices[ticker] = 0.0
             continue
@@ -116,7 +113,7 @@ with st.spinner("Fetching live market prices..."):
     tickers = df['Ticker'].tolist()
     live_prices = get_live_prices(tickers)
 
-# Determine final unit price: Use Prezzo_Fisso if set (>0), otherwise use Yahoo Finance price
+# Determine final unit price
 df['Prezzo_Live_YF'] = df['Ticker'].map(live_prices).fillna(0.0)
 df['Prezzo_Finale'] = df.apply(
     lambda row: row['Prezzo_Fisso'] if row['Prezzo_Fisso'] > 0 else row['Prezzo_Live_YF'], 
@@ -125,19 +122,19 @@ df['Prezzo_Finale'] = df.apply(
 
 df['Valore_Attuale'] = df['Quantita'] * df['Prezzo_Finale']
 
-# --- 3. CATEGORY AGGREGATION ---
+# --- 3. CATEGORY AGGREGATION & SORTING ---
 cat_df = df.groupby('Categoria', as_index=False).agg({
     'Valore_Attuale': 'sum',
-    'Target_Pct': 'sum'  # Sum target percentages for the same category
+    'Target_Pct': 'sum'
 })
 
 valore_totale = cat_df['Valore_Attuale'].sum()
-valore_futuro = valore_totale + cash_injection
 
 cat_df['Peso_Attuale_%'] = (cat_df['Valore_Attuale'] / valore_totale * 100) if valore_totale > 0 else 0
 cat_df['Scostamento_%'] = cat_df['Peso_Attuale_%'] - cat_df['Target_Pct']
-cat_df['Valore_Target_€'] = valore_futuro * (cat_df['Target_Pct'] / 100)
-cat_df['Deficit_€'] = cat_df['Valore_Target_€'] - cat_df['Valore_Attuale']
+
+# Ordina in ordine crescente per Delta % (Scostamento_%)
+cat_df = cat_df.sort_values(by='Scostamento_%', ascending=True).reset_index(drop=True)
 
 # --- 4. DISPLAY KPI ---
 st.divider()
@@ -145,7 +142,14 @@ st.subheader("2. Portfolio Summary")
 
 col1, col2 = st.columns(2)
 col1.metric("Current Portfolio Value", f"€ {valore_totale:,.2f}")
-col2.metric("Post-Deposit Target Value", f"€ {valore_futuro:,.2f}")
+
+if not cat_df.empty:
+    most_underweight = cat_df.iloc[0]
+    col2.metric(
+        "Più Sottopesato", 
+        f"{most_underweight['Categoria']}", 
+        f"{most_underweight['Scostamento_%']:+.2f}%"
+    )
 
 # --- 5. CATEGORY BREAKDOWN TABLE ---
 st.subheader("3. Asset Class Scenarios & Allocation")
@@ -155,7 +159,6 @@ display_cat['Valore (€)'] = display_cat['Valore_Attuale'].apply(lambda x: f"�
 display_cat['Peso Att.'] = display_cat['Peso_Attuale_%'].apply(lambda x: f"{x:.2f}%")
 display_cat['Target'] = display_cat['Target_Pct'].apply(lambda x: f"{x:.1f}%")
 display_cat['Delta %'] = display_cat['Scostamento_%'].apply(lambda x: f"{x:+.2f}%")
-display_cat['Deficit / Surplus (€)'] = display_cat['Deficit_€'].apply(lambda x: f"€ {x:,.2f}" if x > 0 else f"- € {abs(x):,.2f}")
 
 def color_delta(val):
     try:
@@ -168,7 +171,7 @@ def color_delta(val):
         pass
     return ''
 
-styler = display_cat[['Categoria', 'Valore (€)', 'Peso Att.', 'Target', 'Delta %', 'Deficit / Surplus (€)']].style
+styler = display_cat[['Categoria', 'Valore (€)', 'Peso Att.', 'Target', 'Delta %']].style
 
 if hasattr(styler, 'map'):
     styled_cat = styler.map(color_delta, subset=['Delta %'])
@@ -177,32 +180,7 @@ else:
 
 st.dataframe(styled_cat, use_container_width=True, hide_index=True)
 
-# --- 6. REBALANCING RECOMMENDATION ---
-st.divider()
-st.subheader("🎯 Rebalancing Suggestion")
-
-max_deficit_cat = cat_df.loc[cat_df['Deficit_€'].idxmax()]
-
-if max_deficit_cat['Deficit_€'] > 0:
-    target_category = max_deficit_cat['Categoria']
-    primary_etf = df[(df['Categoria'] == target_category) & (df['Is_Primary'] == True)]
-    
-    if primary_etf.empty:
-        primary_etf = df[df['Categoria'] == target_category]
-        
-    recommended_ticker = primary_etf.iloc[0]['Ticker']
-    recommended_name = primary_etf.iloc[0]['Nome Asset']
-    
-    st.success(
-        f"The most underweight category is **{target_category}**.\n\n"
-        f"• **Current Deviation:** `{max_deficit_cat['Scostamento_%']:+.2f}%` from target\n\n"
-        f"• **Required amount to target:** `€ {max_deficit_cat['Deficit_€']:,.2f}`\n\n"
-        f"👉 **Target Asset to buy:** `{recommended_ticker}` ({recommended_name})"
-    )
-else:
-    st.info("All categories are balanced or above target.")
-
-# --- 7. DETAILED POSITIONS EXPANDER ---
+# --- 6. DETAILED POSITIONS EXPANDER ---
 with st.expander("🔍 Show Detailed Holdings"):
     df_detail = df[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Prezzo_Finale', 'Valore_Attuale', 'Is_Primary']].copy()
     df_detail['Unit Price'] = df_detail['Prezzo_Finale'].apply(lambda x: f"€ {x:,.2f}")
