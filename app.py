@@ -40,7 +40,6 @@ st.set_page_config(
 )
 
 st.title("📈 Asset Allocation Tracker")
-st.caption("Asset allocation tracking with support for manual & live assets.")
 
 # --- CARICAMENTO DATI (IN BACKGROUND SILENZIOSO) ---
 if "PORTFOLIO" in st.secrets:
