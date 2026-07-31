@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-# Configurazione Pagina
+# Page Configuration
 st.set_page_config(
     page_title="Rebalance Tracker",
     page_icon="📈",
@@ -12,45 +12,69 @@ st.set_page_config(
 )
 
 st.title("📈 Asset Allocation Tracker")
-st.caption("Monitoraggio dello scostamento per Categoria / Asset Class.")
+st.caption("Asset allocation tracking with support for manual & live assets.")
 
-# --- 1. FONTE DATI PRIVATA ---
-st.subheader("1. Portafoglio e Liquidità")
+# --- 1. PRIVATE DATA SOURCE ---
+st.subheader("1. Portfolio & Cash")
 
 if "PORTFOLIO" in st.secrets:
     csv_data = st.secrets["PORTFOLIO"]
     df = pd.read_csv(io.StringIO(csv_data))
-    # Assicuriamoci che Is_Primary sia booleano
-    df['Is_Primary'] = df['Is_Primary'].astype(str).str.upper().map({'TRUE': True, '1': True, 'FALSE': False, '0': False}).fillna(True)
-    st.success("🔒 Dati portafoglio caricati dai Secrets privati.")
+    st.success("🔒 Portfolio data loaded safely from private Secrets.")
 else:
-    uploaded_file = st.file_uploader("Carica un file Excel (Opzionale)", type=["xlsx"])
+    uploaded_file = st.file_uploader("Upload an Excel file (Optional)", type=["xlsx"])
     if uploaded_file is not None:
         df = pd.read_excel(uploaded_file)
-        if 'Is_Primary' not in df.columns:
-            df['Is_Primary'] = True
     else:
-        # Dati di esempio con 2 ETF Bitcoin
+        # Default fallback sample data
         default_data = {
-            "Ticker": ["BITC.MI", "21BC.DE", "VWCE.DE", "AGGH.MI"],
-            "Nome Asset": ["WisdomTree Bitcoin", "21Shares Bitcoin", "Vanguard All-World", "iShares Global Aggregate"],
-            "Categoria": ["Bitcoin", "Bitcoin", "Azionario Globale", "Obbligazionario"],
-            "Quantita": [30, 50, 250, 1800],
-            "Target_Pct": [5.0, 5.0, 65.0, 30.0],
-            "Is_Primary": [False, True, True, True]
+            "Ticker": ["BITC.MI", "21BC.DE", "VWCE.DE", "AGGH.MI", "MANUAL"],
+            "Nome Asset": ["WisdomTree Bitcoin", "21Shares Bitcoin", "Vanguard All-World", "iShares Global Aggregate", "Unlisted Bond"],
+            "Categoria": ["Bitcoin", "Bitcoin", "Azionario Globale", "Obbligazionario", "Obbligazionario"],
+            "Quantita": [30, 50, 250, 1800, 1],
+            "Target_Pct": [5.0, 5.0, 50.0, 20.0, 20.0],
+            "Is_Primary": [False, True, True, True, True],
+            "Prezzo_Fisso": [None, None, None, None, 20000.0]
         }
         df = pd.DataFrame(default_data)
-        st.info("💡 Stai usando i dati di esempio. Inserisci i Secrets o carica un file Excel.")
+        st.info("💡 Using sample data. Set up Secrets or upload an Excel file.")
 
-cash_injection = st.number_input("Nuova Liquidità da aggiungere (€)", min_value=0.0, value=1000.0, step=100.0)
+# --- DATA SANITIZATION ---
+df.columns = df.columns.astype(str).str.strip()
 
-# --- 2. RECUPERO PREZZI LIVE ---
+if "Categoria" not in df.columns:
+    df["Categoria"] = df["Nome Asset"]
+
+if "Is_Primary" not in df.columns:
+    df["Is_Primary"] = True
+else:
+    df["Is_Primary"] = (
+        df["Is_Primary"]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .map({"TRUE": True, "1": True, "FALSE": False, "0": False})
+        .fillna(True)
+    )
+
+if "Prezzo_Fisso" not in df.columns:
+    df["Prezzo_Fisso"] = 0.0
+else:
+    df["Prezzo_Fisso"] = pd.to_numeric(df["Prezzo_Fisso"], errors="coerce").fillna(0.0)
+
+cash_injection = st.number_input("New Cash Injection (€)", min_value=0.0, value=1000.0, step=100.0)
+
+# --- 2. LIVE PRICES & MANUAL PRICE OVERRIDE ---
 @st.cache_data(ttl=300)
 def get_live_prices(tickers):
     prices = {}
     for ticker in tickers:
+        # Skip fetching if ticker is manual or empty
+        if not ticker or str(ticker).upper() in ["MANUAL", "NONE", "NAN", "CASH"]:
+            prices[ticker] = 0.0
+            continue
         try:
-            t = yf.Ticker(ticker)
+            t = yf.Ticker(str(ticker))
             price = t.fast_info.get('lastPrice', None)
             if price is None or pd.isna(price):
                 hist = t.history(period="1d")
@@ -60,18 +84,23 @@ def get_live_prices(tickers):
             prices[ticker] = 0.0
     return prices
 
-with st.spinner("Aggiornamento prezzi di mercato in tempo reale..."):
+with st.spinner("Fetching live market prices..."):
     tickers = df['Ticker'].tolist()
     live_prices = get_live_prices(tickers)
 
-df['Prezzo_Live'] = df['Ticker'].map(live_prices)
-df['Valore_Attuale'] = df['Quantita'] * df['Prezzo_Live']
+# Determine final unit price: Use Prezzo_Fisso if set (>0), otherwise use Yahoo Finance price
+df['Prezzo_Live_YF'] = df['Ticker'].map(live_prices).fillna(0.0)
+df['Prezzo_Finale'] = df.apply(
+    lambda row: row['Prezzo_Fisso'] if row['Prezzo_Fisso'] > 0 else row['Prezzo_Live_YF'], 
+    axis=1
+)
 
-# --- 3. CALCOLO AGGREGATO PER CATEGORIA ---
-# Raggruppiamo i valori per Categoria
+df['Valore_Attuale'] = df['Quantita'] * df['Prezzo_Finale']
+
+# --- 3. CATEGORY AGGREGATION ---
 cat_df = df.groupby('Categoria', as_index=False).agg({
     'Valore_Attuale': 'sum',
-    'Target_Pct': 'first'  # Prende il target della categoria
+    'Target_Pct': 'sum'  # Sum target percentages for the same category
 })
 
 valore_totale = cat_df['Valore_Attuale'].sum()
@@ -84,14 +113,14 @@ cat_df['Deficit_€'] = cat_df['Valore_Target_€'] - cat_df['Valore_Attuale']
 
 # --- 4. DISPLAY KPI ---
 st.divider()
-st.subheader("2. Riepilogo Portafoglio")
+st.subheader("2. Portfolio Summary")
 
 col1, col2 = st.columns(2)
-col1.metric("Valore Portafoglio", f"€ {valore_totale:,.2f}")
-col2.metric("Valore Post-Versamento", f"€ {valore_futuro:,.2f}")
+col1.metric("Current Portfolio Value", f"€ {valore_totale:,.2f}")
+col2.metric("Post-Deposit Target Value", f"€ {valore_futuro:,.2f}")
 
-# --- 5. TABELLA SCOSTAMENTI PER CATEGORIA ---
-st.subheader("3. Scostamento per Categoria / Asset Class")
+# --- 5. CATEGORY BREAKDOWN TABLE ---
+st.subheader("3. Asset Class Scenarios & Allocation")
 
 display_cat = cat_df.copy()
 display_cat['Valore (€)'] = display_cat['Valore_Attuale'].apply(lambda x: f"€ {x:,.2f}")
@@ -120,43 +149,40 @@ else:
 
 st.dataframe(styled_cat, use_container_width=True, hide_index=True)
 
-# --- 6. RACCOMANDAZIONE D'ACQUISTO ---
+# --- 6. REBALANCING RECOMMENDATION ---
 st.divider()
-st.subheader("🎯 Su quale ETF versare la liquidità?")
+st.subheader("🎯 Rebalancing Suggestion")
 
 max_deficit_cat = cat_df.loc[cat_df['Deficit_€'].idxmax()]
 
 if max_deficit_cat['Deficit_€'] > 0:
     target_category = max_deficit_cat['Categoria']
-    
-    # Identifichiamo l'ETF primario per quella categoria
     primary_etf = df[(df['Categoria'] == target_category) & (df['Is_Primary'] == True)]
     
     if primary_etf.empty:
-        # Fallback se nessun ETF è segnato come primario
         primary_etf = df[df['Categoria'] == target_category]
         
     recommended_ticker = primary_etf.iloc[0]['Ticker']
     recommended_name = primary_etf.iloc[0]['Nome Asset']
     
     st.success(
-        f"La categoria più sottopesata è **{target_category}**.\n\n"
-        f"• **Scostamento Categoria:** `{max_deficit_cat['Scostamento_%']:+.2f}%` dal target\n\n"
-        f"• **Mancanti al target di Categoria:** `€ {max_deficit_cat['Deficit_€']:,.2f}`\n\n"
-        f"👉 **ETF Consigliato per l'acquisto:** `{recommended_ticker}` ({recommended_name})"
+        f"The most underweight category is **{target_category}**.\n\n"
+        f"• **Current Deviation:** `{max_deficit_cat['Scostamento_%']:+.2f}%` from target\n\n"
+        f"• **Required amount to target:** `€ {max_deficit_cat['Deficit_€']:,.2f}`\n\n"
+        f"👉 **Target Asset to buy:** `{recommended_ticker}` ({recommended_name})"
     )
 else:
-    st.info("Tutte le categorie sono perfettamente bilanciate o sopra il target.")
+    st.info("All categories are balanced or above target.")
 
-# --- 7. DETTAGLIO POSIZIONI SINGOLE ---
-with st.expander("🔍 Mostra Dettaglio Singoli Titoli held"):
-    df_detail = df[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Prezzo_Live', 'Valore_Attuale', 'Is_Primary']].copy()
-    df_detail['Prezzo Live'] = df_detail['Prezzo_Live'].apply(lambda x: f"€ {x:,.2f}")
-    df_detail['Valore Totale'] = df_detail['Valore_Attuale'].apply(lambda x: f"€ {x:,.2f}")
-    st.dataframe(df_detail[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Prezzo Live', 'Valore Totale', 'Is_Primary']], hide_index=True)
+# --- 7. DETAILED POSITIONS EXPANDER ---
+with st.expander("🔍 Show Detailed Holdings"):
+    df_detail = df[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Prezzo_Finale', 'Valore_Attuale', 'Is_Primary']].copy()
+    df_detail['Unit Price'] = df_detail['Prezzo_Finale'].apply(lambda x: f"€ {x:,.2f}")
+    df_detail['Total Value'] = df_detail['Valore_Attuale'].apply(lambda x: f"€ {x:,.2f}")
+    st.dataframe(df_detail[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Unit Price', 'Total Value', 'Is_Primary']], hide_index=True)
 
-st.caption("Pulsante di aggiornamento manuale dati:")
-if st.button("🔄 Ricarica Prezzi Live"):
+st.caption("Manual Data Refresh:")
+if st.button("🔄 Refresh Live Prices"):
     st.cache_data.clear()
     if hasattr(st, "rerun"):
         st.rerun()
