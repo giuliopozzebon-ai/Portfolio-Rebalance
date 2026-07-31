@@ -1,3 +1,30 @@
+# --- CONTROLLO ACCESSO CON PASSWORD ---
+def check_password():
+    if "PASSWORD" not in st.secrets:
+        return True  # Se non hai impostato nessuna password nei Secrets, l'app si apre normalmente
+
+    if "authenticated" not in st.session_state:
+        st.session_state["authenticated"] = False
+
+    if not st.session_state["authenticated"]:
+        st.title("🔒 Accesso Riservato")
+        user_password = st.text_input("Inserisci la password per accedere al portafoglio:", type="password")
+        
+        if st.button("Accedi"):
+            if user_password == st.secrets["PASSWORD"]:
+                st.session_state["authenticated"] = True
+                st.rerun()
+            else:
+                st.error("❌ Password errata!")
+        return False
+        
+    return True
+
+# Blocca l'esecuzione dell'app finché la password non è corretta
+if not check_password():
+    st.stop()
+# -------------------------------------
+
 import io
 import pandas as pd
 import streamlit as st
