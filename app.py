@@ -204,9 +204,10 @@ def call_gemini_copilot(summary_payload, api_key):
     {json.dumps(summary_payload, indent=2, ensure_ascii=False)}
 
     ISTRUZIONI DI STRUTTURA:
-    Organizza la risposta in 2 paragrafi concisi:
-    1. **Sentiment di mercato**: Fammi un'analisi di mercato sintentica ad oggi con il sentiment di mercato per ciascun asset class
+    Organizza la risposta in 3 paragrafi concisi:
+    1. **Sentiment di mercato**: Fammi un'analisi di mercato sintentica ad oggi con il sentiment di mercato per ciascun asset class, non basato sui pesi del mio portafoglio, ma in generale
     2. **News**: dammi le news più importanti che possono impattare il mio portafoglio
+    3. **Suggerimenti tattici**: dammi 2-3 suggerimenti tattici che possono essere utili, legati ai pesi attuali del mio portafoglio, ma senza porre il focus sugli scostamenti attuali che sono già evidenti
     """
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
