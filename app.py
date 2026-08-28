@@ -204,10 +204,9 @@ def call_gemini_copilot(summary_payload, api_key):
     {json.dumps(summary_payload, indent=2, ensure_ascii=False)}
 
     ISTRUZIONI DI STRUTTURA:
-    Organizza la risposta in 3 paragrafi concisi:
-    1. **Sintesi Allocazione**: Breve riassunto dello stato attuale del portafoglio ed eventuali asimmetrie rilevanti.
-    2. **Valutazione Scostamenti e Rischio**: Analisi dei principali delta in Euro e % sia per le componenti core (Dev Stocks, Quality, Value) sia per le componenti decorrelanti/difensive (Trend Follow, Gold, Bitcoin, Bonds).
-    3. **Indicazioni Operative per il Ribilanciamento**: Priorità concrete di acquisto o aggiustamento per i prossimi capitali da versare.
+    Organizza la risposta in 2 paragrafi concisi:
+    1. **Sentiment di mercato**: Fammi un'analisi di mercato sintentica ad oggi con il sentiment di mercato per ciascun asset class
+    2. **News**: dammi le news più importanti che possono impattare il mio portafoglio
     """
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
