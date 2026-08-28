@@ -1,84 +1,7 @@
-import streamlit as st
-import json
-import requests
-import pandas as pd
-
-st.set_page_config(page_title="Portfolio AI Copilot", layout="wide")
-
-# Recupero API Key da secrets o input manuale
-api_key = st.sidebar.text_input("Gemini API Key", type="password", value=st.secrets.get("GEMINI_API_KEY", ""))
-
-st.title("📊 Asset Allocation & AI Copilot")
-
-# Dati del portafoglio (da sostituire con il tuo DataFrame/database)
-portfolio_data = {
-    "data_analisi": "28/08/2026",
-    "valore_totale_eur": 150000,
-    "allocazione_attuale": {
-        "Azionario World (UCITS)": {"peso_attuale_%": 48.0, "target_%": 50.0},
-        "Factor Tilt (Value/Small Cap)": {"peso_attuale_%": 12.0, "target_%": 10.0},
-        "Managed Futures (Trend Following)": {"peso_attuale_%": 16.0, "target_%": 15.0},
-        "Commodities & Oro": {"peso_attuale_%": 14.0, "target_%": 10.0},
-        "Governative Short Term / Liquidità": {"peso_attuale_%": 10.0, "target_%": 15.0}
-    },
-    "scostamenti_critici": [
-        "Commodities & Oro sovrappesati del +4.0% oltre la soglia di tolleranza",
-        "Liquidità/Short Term sottopesata del -5.0% rispetto al target"
-    ]
-}
-
-# Layout a colonne per visualizzazione tabelle
-col1, col2 = st.columns([3, 2])
-
-with col1:
-    st.subheader("Pesi di Portafoglio e Target")
-    df = pd.DataFrame.from_dict(portfolio_data["allocazione_attuale"], orient="index")
-    df["scostamento_%"] = df["peso_attuale_%"] - df["target_%"]
-    st.dataframe(df.style.highlight_between(left=-2, right=2, inclusive="neither", color="#f0f2f6"), use_container_width=True)
-
-# Funzione per interrogare l'API di Gemini
-def analyze_portfolio_with_gemini(data, key):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
-    
-    prompt = f"""
-    Sei un consulente di portafoglio ed executive assistant. Analizza i seguenti dati strutturati sul portafoglio di investimento ed elabora un sintetico report esecutivo.
-
-    DATI DI PORTAFOGLIO:
-    {json.dumps(data, indent=2, ensure_ascii=False)}
-
-    ISTRUZIONI DI STRUTTURA:
-    Fornisci la risposta divisa in 3 paragrafi concisi e diretti:
-    1. **Variazioni e Quadro Generale**: Commenta la situazione attuale dell'asset allocation.
-    2. **Esposizione ai Fattori e Rischi**: Valuta i pesi dei fattori di protezione e decorrelazione (Value, Managed Futures, Commodities) e la concentrazione del rischio.
-    3. **Suggerimenti di Ribilanciamento**: Indica le azioni operative prioritarie per riallineare i pesi ai target nominali.
-    """
-
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    headers = {'Content-Type': 'application/json'}
-    
-    response = requests.post(url, headers=headers, json=payload)
-    if response.status_code == 200:
-        return response.json()['candidates'][0]['content']['parts'][0]['text']
-    else:
-        return f"Errore durante la generazione del report ({response.status_code}): {response.text}"
-
-# Sezione AI Copilot
-with col2:
-    st.subheader("💡 Copilot Esecutivo")
-    if st.button("Genera Analisi AI", type="primary"):
-        if not api_key:
-            st.error("Inserisci la tua API Key nella barra laterale o nei Secrets di Streamlit.")
-        else:
-            with st.spinner("Elaborazione analisi di portafoglio..."):
-                report = analyze_portfolio_with_gemini(portfolio_data, api_key)
-                st.info(report)
-
-
-
-
-
 import io
+import json
 import pandas as pd
+import requests
 import streamlit as st
 import yfinance as yf
 
@@ -283,11 +206,66 @@ table_height = (len(display_cat) + 1) * 35 + 10
 
 st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table_height)
 
-#--- Analisi AI
 
-if st.button("Genera Analisi AI"):
+# --- INTEGRATING GEMINI AI COPILOT ---
+def call_gemini_copilot(summary_payload, api_key):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    
+    prompt = f"""
+    Sei un assistente analista di portafoglio professionale. Analizza i dati aggiornati del portafoglio di investimento ed elabora un report di sintesi esecutivo e diretto.
+
+    DATI PORTAFOGLIO COMPLETAMENTE AGGIORNATI:
+    {json.dumps(summary_payload, indent=2, ensure_ascii=False)}
+
+    ISTRUZIONI DI STRUTTURA:
+    Organizza la risposta in 3 sezioni chiare:
+    1. **Quadro Asset Allocation**: Sintesi dello stato attuale del portafoglio ed eventuali squilibri principali.
+    2. **Analisi Scostamenti e Rischio**: Valuta l'impatto dei pesi correnti (sovrappesi/sottopesi sia in % assoluta sia in Delta Euro).
+    3. **Suggerimenti di Ribilanciamento**: Priorità operative dettagliate per i prossimi acquisti o riallineamenti verso i pesi target.
+    """
+
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    headers = {'Content-Type': 'application/json'}
+    
+    response = requests.post(url, headers=headers, json=payload)
+    if response.status_code == 200:
+        res_json = response.json()
+        return res_json['candidates'][0]['content']['parts'][0]['text']
+    else:
+        return f"❌ Errore API Gemini (Codice {response.status_code}): {response.text}"
+
+st.divider()
+st.subheader("💡 AI Copilot Portfolio Brief")
+
+if st.button("✨ Genera Analisi AI Ribilanciamento", type="primary"):
+    api_key = st.secrets.get("GEMINI_API_KEY", "")
+    
+    if not api_key:
+        st.error("⚠️ Nessuna `GEMINI_API_KEY` trovata nei Secrets di Streamlit. Aggiungila per abilitare il Copilot.")
+    else:
+        with st.spinner("Elaborazione analisi esecutiva in corso..."):
+            # Costruzione payload dinamico estratto da cat_df
+            portfolio_summary = {
+                "valore_totale_eur": round(valore_totale, 2),
+                "asset_classes": []
+            }
+            for idx, row in cat_df.iterrows():
+                portfolio_summary["asset_classes"].append({
+                    "categoria": row['Categoria'],
+                    "valore_eur": round(row['Valore_Attuale'], 2),
+                    "peso_attuale_pct": round(row['Peso_Attuale_%'], 2),
+                    "target_pct": round(row['Target_Pct'], 2),
+                    "scostamento_pct": round(row['Scostamento_%'], 2),
+                    "delta_euro": round(row['Delta_Euro'], 2),
+                    "var_relativa_pct": round(row['Variazione_Relativa_%'], 2)
+                })
+
+            ai_response = call_gemini_copilot(portfolio_summary, api_key)
+            st.markdown(ai_response)
+
 
 # --- DETAILED POSITIONS EXPANDER ---
+st.divider()
 with st.expander("🔍 Show Detailed Holdings"):
     df_detail = df[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Prezzo_Finale', 'Valore_Attuale', 'Is_Primary']].copy()
     df_detail['Unit Price'] = df_detail['Prezzo_Finale'].apply(lambda x: f"€ {x:,.2f}")
