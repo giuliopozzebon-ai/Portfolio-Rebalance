@@ -194,7 +194,8 @@ st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table
 
 # --- INTEGRATING GEMINI AI COPILOT ---
 def call_gemini_copilot(summary_payload, api_key):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    # URL aggiornato con il nuovo modello gemini-3.6-flash
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
     
     prompt = f"""
     Sei un assistente ed esecutivo di portafoglio d'investimento. Analizza i dati del portafoglio calcolati in tempo reale ed elabora un breve report di sintesi esecutivo in italiano.
