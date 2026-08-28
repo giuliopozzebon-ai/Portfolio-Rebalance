@@ -166,9 +166,10 @@ display_cat['Delta (€)'] = display_cat['Delta_Euro'].apply(
     lambda x: f"+ € {x:,.2f}" if x > 0 else (f"- € {abs(x):,.2f}" if x < 0 else "€ 0.00")
 )
 
+# Funzione per evidenziare Delta %
 def color_delta(val):
     try:
-        num = float(str(val).replace('%', ''))
+        num = float(str(val).replace('%', '').replace('+', '').strip())
         if num < -1.0:
             return 'background-color: #fce8e6; color: #a50e0e; font-weight: bold;'
         elif num > 1.0:
@@ -177,12 +178,26 @@ def color_delta(val):
         pass
     return ''
 
+# Funzione per evidenziare Var. Rel. % (+10% verde, -10% rosso)
+def color_var_rel(val):
+    try:
+        num = float(str(val).replace('%', '').replace('+', '').strip())
+        if num < -10.0:
+            return 'background-color: #fce8e6; color: #a50e0e; font-weight: bold;'
+        elif num > 10.0:
+            return 'background-color: #e6f4ea; color: #137333; font-weight: bold;'
+    except:
+        pass
+    return ''
+
 styler = display_cat[['Categoria', 'Valore (€)', 'Peso Att.', 'Delta %', 'Var. Rel. %', 'Delta (€)']].style
 
 if hasattr(styler, 'map'):
     styled_cat = styler.map(color_delta, subset=['Delta %'])
+    styled_cat = styled_cat.map(color_var_rel, subset=['Var. Rel. %'])
 else:
     styled_cat = styler.applymap(color_delta, subset=['Delta %'])
+    styled_cat = styled_cat.applymap(color_var_rel, subset=['Var. Rel. %'])
 
 # Calcolo dinamico dell'altezza per adattare la tabella ed evitare la barra di scorrimento
 table_height = (len(display_cat) + 1) * 35 + 10
