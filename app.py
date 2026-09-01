@@ -250,7 +250,7 @@ with st.spinner("Caricamento storico a 1 anno..."):
 
 if not hist_chart_df.empty:
     # height=600 doubles standard chart height to clearly show fluctuations
-    st.line_chart(hist_chart_df, height=600)
+    st.line_chart(hist_chart_df, height=1200)
 else:
     st.info("Dati storici di prezzo non disponibili al momento.")
 
