@@ -1,5 +1,7 @@
 import io
+import json
 import pandas as pd
+import requests
 import streamlit as st
 import yfinance as yf
 
@@ -40,9 +42,9 @@ st.set_page_config(
 )
 
 st.title("📈 Asset Allocation Tracker")
-st.caption("Asset allocation tracking with support for manual & live assets.")
+st.caption("Asset allocation tracking con supporto per titoli Live & Manuali.")
 
-# --- CARICAMENTO DATI (IN BACKGROUND SILENZIOSO) ---
+# --- CARICAMENTO DATI ---
 if "PORTFOLIO" in st.secrets:
     csv_data = st.secrets["PORTFOLIO"]
     df = pd.read_csv(io.StringIO(csv_data))
@@ -116,7 +118,6 @@ def get_historical_position_values(df_assets):
         p_fixed = float(row['Prezzo_Fisso'])
         label = f"{row['Nome Asset']} ({t})" if t.upper() not in ["MANUAL", "NONE", "NAN", "CASH", ""] else row['Nome Asset']
         
-        fetched = False
         if t.upper() not in ["MANUAL", "NONE", "NAN", "CASH", ""] and t:
             try:
                 hist = yf.Ticker(t).history(period="1y")
@@ -124,7 +125,6 @@ def get_historical_position_values(df_assets):
                     s = hist['Close'] * q
                     s.index = s.index.tz_localize(None)
                     series_dict[label] = s
-                    fetched = True
             except Exception:
                 pass
                 
@@ -145,11 +145,11 @@ def get_historical_position_values(df_assets):
             
     return hist_df.ffill().bfill()
 
-with st.spinner("Fetching live market prices..."):
+with st.spinner("Aggiornamento prezzi di mercato..."):
     tickers = df['Ticker'].tolist()
     live_prices = get_live_prices(tickers)
 
-# Determine final unit price
+# Determinazione prezzo finale unità
 df['Prezzo_Live_YF'] = df['Ticker'].map(live_prices).fillna(0.0)
 df['Prezzo_Finale'] = df.apply(
     lambda row: row['Prezzo_Fisso'] if row['Prezzo_Fisso'] > 0 else row['Prezzo_Live_YF'], 
@@ -245,15 +245,72 @@ st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table
 # --- 1-YEAR TREND CHART ---
 st.subheader("📊 1-Year Position Values Trend (€)")
 
-with st.spinner("Loading 1-year historical trends..."):
+with st.spinner("Caricamento storico a 1 anno..."):
     hist_chart_df = get_historical_position_values(df)
 
 if not hist_chart_df.empty:
-    st.line_chart(hist_chart_df)
+    # height=600 doubles standard chart height to clearly show fluctuations
+    st.line_chart(hist_chart_df, height=600)
 else:
-    st.info("Historical price data currently unavailable.")
+    st.info("Dati storici di prezzo non disponibili al momento.")
+
+# --- INTEGRATING GEMINI AI COPILOT ---
+def call_gemini_copilot(summary_payload, api_key):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
+    
+    prompt = f"""
+    Sei un assistente ed esecutivo di portafoglio d'investimento. Analizza i dati del portafoglio calcolati in tempo reale ed elabora un breve report di sintesi esecutivo in italiano.
+
+    DATI DI PORTAFOGLIO AGGIORNATI:
+    {json.dumps(summary_payload, indent=2, ensure_ascii=False)}
+
+    ISTRUZIONI DI STRUTTURA:
+    Organizza la risposta in 3 paragrafi concisi:
+    1. **Sentiment di mercato**: Fammi un'analisi di mercato sintentica ad oggi con il sentiment di mercato per ciascun asset class, non basato sui pesi del mio portafoglio, ma in generale
+    2. **News**: dammi le news più importanti che possono impattare il mio portafoglio
+    3. **Suggerimenti tattici**: dammi 2-3 suggerimenti tattici che possono essere utili, legati ai pesi attuali del mio portafoglio, ma senza porre il focus sugli scostamenti attuali che sono già evidenti
+    """
+
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    headers = {'Content-Type': 'application/json'}
+    
+    response = requests.post(url, headers=headers, json=payload)
+    if response.status_code == 200:
+        res_json = response.json()
+        return res_json['candidates'][0]['content']['parts'][0]['text']
+    else:
+        return f"❌ Errore API Gemini (Codice {response.status_code}): {response.text}"
+
+st.divider()
+st.subheader("💡 AI Copilot Portfolio Brief")
+
+if st.button("✨ Genera Analisi AI Ribilanciamento", type="primary"):
+    api_key = st.secrets.get("GEMINI_API_KEY", "")
+    
+    if not api_key:
+        st.error("⚠️ Nessuna `GEMINI_API_KEY` trovata nei Secrets di Streamlit. Aggiungila nei tuoi Secrets per attivare l'AI.")
+    else:
+        with st.spinner("Elaborazione analisi di portafoglio con Gemini..."):
+            portfolio_summary = {
+                "valore_totale_eur": round(valore_totale, 2),
+                "asset_classes": []
+            }
+            for idx, row in cat_df.iterrows():
+                portfolio_summary["asset_classes"].append({
+                    "categoria": row['Categoria'],
+                    "valore_eur": round(row['Valore_Attuale'], 2),
+                    "peso_attuale_pct": round(row['Peso_Attuale_%'], 2),
+                    "target_pct": round(row['Target_Pct'], 2),
+                    "scostamento_pct": round(row['Scostamento_%'], 2),
+                    "delta_euro": round(row['Delta_Euro'], 2),
+                    "var_relativa_pct": round(row['Variazione_Relativa_%'], 2)
+                })
+
+            ai_response = call_gemini_copilot(portfolio_summary, api_key)
+            st.markdown(ai_response)
 
 # --- DETAILED POSITIONS EXPANDER ---
+st.divider()
 with st.expander("🔍 Show Detailed Holdings"):
     df_detail = df[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Prezzo_Finale', 'Valore_Attuale', 'Is_Primary']].copy()
     df_detail['Unit Price'] = df_detail['Prezzo_Finale'].apply(lambda x: f"€ {x:,.2f}")
