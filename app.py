@@ -93,7 +93,7 @@ else:
 def get_live_prices(tickers):
     prices = {}
     for ticker in tickers:
-        if not ticker or str(ticker).upper() in ["MANUAL", "NONE", "NAN", "CASH"]:
+        if not ticker or str(ticker).upper() in ["MANUAL", "NONE", "NAN", "CASH", "BOND"]:
             prices[ticker] = 0.0
             continue
         try:
@@ -107,42 +107,41 @@ def get_live_prices(tickers):
             prices[ticker] = 0.0
     return prices
 
-# --- 1-YEAR HISTORICAL POSITION VALUES ---
+# --- 1-YEAR NORMALIZED TREND CHART (BASE 100) ---
 @st.cache_data(ttl=3600)
-def get_historical_position_values(df_assets):
+def get_historical_normalized_trends(df_assets):
     series_dict = {}
     
     for _, row in df_assets.iterrows():
         t = str(row['Ticker']).strip()
-        q = float(row['Quantita'])
-        p_fixed = float(row['Prezzo_Fisso'])
-        label = f"{row['Nome Asset']} ({t})" if t.upper() not in ["MANUAL", "NONE", "NAN", "CASH", ""] else row['Nome Asset']
+        cat = str(row['Categoria']).strip().upper()
         
-        if t.upper() not in ["MANUAL", "NONE", "NAN", "CASH", ""] and t:
-            try:
-                hist = yf.Ticker(t).history(period="1y")
-                if not hist.empty and 'Close' in hist.columns:
-                    s = hist['Close'] * q
-                    s.index = s.index.tz_localize(None)
-                    series_dict[label] = s
-            except Exception:
-                pass
+        # Esclude asset manuali, fixed price, o legati a BOND
+        if (not t or 
+            t.upper() in ["MANUAL", "NONE", "NAN", "CASH", "BOND"] or 
+            "BOND" in t.upper() or 
+            "BOND" in cat or 
+            row['Prezzo_Fisso'] > 0):
+            continue
+            
+        label = f"{row['Nome Asset']} ({t})"
+        
+        try:
+            hist = yf.Ticker(t).history(period="1y")
+            if not hist.empty and 'Close' in hist.columns:
+                s = hist['Close'].dropna()
+                if not s.empty and s.iloc[0] > 0:
+                    # Normalizzazione Base 100 (Indice a 100 ad inizio periodo)
+                    s_norm = (s / s.iloc[0]) * 100
+                    s_norm.index = s_norm.index.tz_localize(None)
+                    series_dict[label] = s_norm
+        except Exception:
+            pass
                 
     if not series_dict:
         return pd.DataFrame()
         
     hist_df = pd.DataFrame(series_dict)
-    
-    # Fill manual / fixed price assets across the timeline
-    for _, row in df_assets.iterrows():
-        t = str(row['Ticker']).strip()
-        q = float(row['Quantita'])
-        p_fixed = float(row['Prezzo_Fisso'])
-        label = f"{row['Nome Asset']} ({t})" if t.upper() not in ["MANUAL", "NONE", "NAN", "CASH", ""] else row['Nome Asset']
-        
-        if label not in hist_df.columns:
-            hist_df[label] = p_fixed * q
-            
     return hist_df.ffill().bfill()
 
 with st.spinner("Aggiornamento prezzi di mercato..."):
@@ -242,15 +241,15 @@ else:
 table_height = (len(display_cat) + 1) * 35 + 10
 st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table_height)
 
-# --- 1-YEAR TREND CHART ---
-st.subheader("📊 1-Year Position Values Trend (€)")
+# --- 1-YEAR NORMALIZED TREND CHART ---
+st.subheader("📊 1-Year Performance Comparison (Base 100)")
+st.caption("Performance relativa degli ETF/titoli nell'ultimo anno (Base 100 = 1 anno fa, esclusi Bond e tit. manuali).")
 
-with st.spinner("Caricamento storico a 1 anno..."):
-    hist_chart_df = get_historical_position_values(df)
+with st.spinner("Caricamento performance normalizzata a 1 anno..."):
+    hist_chart_df = get_historical_normalized_trends(df)
 
 if not hist_chart_df.empty:
-    # height=600 doubles standard chart height to clearly show fluctuations
-    st.line_chart(hist_chart_df, height=1200)
+    st.line_chart(hist_chart_df, height=500)
 else:
     st.info("Dati storici di prezzo non disponibili al momento.")
 
