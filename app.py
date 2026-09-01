@@ -1,5 +1,6 @@
 import io
 import json
+import altair as alt
 import pandas as pd
 import requests
 import streamlit as st
@@ -107,6 +108,27 @@ def get_live_prices(tickers):
             prices[ticker] = 0.0
     return prices
 
+# --- CALCOLO PERFORMANCE 1 ANNO PER TICKER ---
+@st.cache_data(ttl=3600)
+def get_ticker_1y_performance(tickers):
+    perf_dict = {}
+    for ticker in tickers:
+        t = str(ticker).strip()
+        if not t or t.upper() in ["MANUAL", "NONE", "NAN", "CASH", "BOND"] or "BOND" in t.upper():
+            perf_dict[ticker] = None
+            continue
+        try:
+            hist = yf.Ticker(t).history(period="1y")
+            if not hist.empty and len(hist) > 1:
+                p_start = hist['Close'].iloc[0]
+                p_end = hist['Close'].iloc[-1]
+                perf_dict[ticker] = ((p_end - p_start) / p_start) * 100
+            else:
+                perf_dict[ticker] = None
+        except Exception:
+            perf_dict[ticker] = None
+    return perf_dict
+
 # --- 1-YEAR NORMALIZED TREND CHART (BASE 100) ---
 @st.cache_data(ttl=3600)
 def get_historical_normalized_trends(df_assets):
@@ -116,7 +138,6 @@ def get_historical_normalized_trends(df_assets):
         t = str(row['Ticker']).strip()
         cat = str(row['Categoria']).strip().upper()
         
-        # Esclude asset manuali, fixed price, o legati a BOND
         if (not t or 
             t.upper() in ["MANUAL", "NONE", "NAN", "CASH", "BOND"] or 
             "BOND" in t.upper() or 
@@ -131,7 +152,6 @@ def get_historical_normalized_trends(df_assets):
             if not hist.empty and 'Close' in hist.columns:
                 s = hist['Close'].dropna()
                 if not s.empty and s.iloc[0] > 0:
-                    # Normalizzazione Base 100 (Indice a 100 ad inizio periodo)
                     s_norm = (s / s.iloc[0]) * 100
                     s_norm.index = s_norm.index.tz_localize(None)
                     series_dict[label] = s_norm
@@ -147,6 +167,7 @@ def get_historical_normalized_trends(df_assets):
 with st.spinner("Aggiornamento prezzi di mercato..."):
     tickers = df['Ticker'].tolist()
     live_prices = get_live_prices(tickers)
+    perf_1y_dict = get_ticker_1y_performance(tickers)
 
 # Determinazione prezzo finale unità
 df['Prezzo_Live_YF'] = df['Ticker'].map(live_prices).fillna(0.0)
@@ -154,6 +175,7 @@ df['Prezzo_Finale'] = df.apply(
     lambda row: row['Prezzo_Fisso'] if row['Prezzo_Fisso'] > 0 else row['Prezzo_Live_YF'], 
     axis=1
 )
+df['Perf_1Y_%'] = df['Ticker'].map(perf_1y_dict)
 
 df['Valore_Attuale'] = df['Quantita'] * df['Prezzo_Finale']
 
@@ -243,13 +265,29 @@ st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table
 
 # --- 1-YEAR NORMALIZED TREND CHART ---
 st.subheader("📊 1-Year Performance Comparison (Base 100)")
-st.caption("Performance relativa degli ETF/titoli nell'ultimo anno (Base 100 = 1 anno fa, esclusi Bond e tit. manuali).")
+st.caption("Performance relativa degli ETF/titoli nell'ultimo anno (Base 100 = 1 anno fa, esclusi Bond e tit. manuali). Passa il mouse sopra le linee per i dettagli.")
 
 with st.spinner("Caricamento performance normalizzata a 1 anno..."):
     hist_chart_df = get_historical_normalized_trends(df)
 
 if not hist_chart_df.empty:
-    st.line_chart(hist_chart_df, height=500)
+    df_chart = hist_chart_df.reset_index()
+    date_col = df_chart.columns[0]
+    df_melted = df_chart.melt(id_vars=[date_col], var_name='Asset', value_name='Valore')
+
+    chart = (
+        alt.Chart(df_melted)
+        .mark_line()
+        .encode(
+            x=alt.X(f'{date_col}:T', title='Data'),
+            y=alt.Y('Valore:Q', title='Performance (Base 100)', scale=alt.Scale(zero=False)),
+            color='Asset:N',
+            tooltip=[alt.Tooltip(f'{date_col}:T', title='Data'), 'Asset:N', alt.Tooltip('Valore:Q', format='.2f', title='Base 100')]
+        )
+        .configure_legend(disable=True)  # Rimuove la legenda in basso
+        .properties(height=500)
+    )
+    st.altair_chart(chart, use_container_width=True)
 else:
     st.info("Dati storici di prezzo non disponibili al momento.")
 
@@ -311,10 +349,17 @@ if st.button("✨ Genera Analisi AI Ribilanciamento", type="primary"):
 # --- DETAILED POSITIONS EXPANDER ---
 st.divider()
 with st.expander("🔍 Show Detailed Holdings"):
-    df_detail = df[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Prezzo_Finale', 'Valore_Attuale', 'Is_Primary']].copy()
+    df_detail = df[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Prezzo_Finale', 'Valore_Attuale', 'Perf_1Y_%', 'Is_Primary']].copy()
     df_detail['Unit Price'] = df_detail['Prezzo_Finale'].apply(lambda x: f"€ {x:,.2f}")
     df_detail['Total Value'] = df_detail['Valore_Attuale'].apply(lambda x: f"€ {x:,.2f}")
-    st.dataframe(df_detail[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Unit Price', 'Total Value', 'Is_Primary']], hide_index=True)
+    df_detail['Perf. 1Y %'] = df_detail['Perf_1Y_%'].apply(
+        lambda x: f"{x:+.2f}%" if pd.notna(x) and x is not None else "N/D"
+    )
+    
+    st.dataframe(
+        df_detail[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Unit Price', 'Total Value', 'Perf. 1Y %', 'Is_Primary']], 
+        hide_index=True
+    )
 
 st.caption("Manual Data Refresh:")
 if st.button("🔄 Refresh Live Prices"):
