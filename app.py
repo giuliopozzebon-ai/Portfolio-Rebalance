@@ -125,7 +125,7 @@ def get_ticker_1y_performance(tickers):
             perf_dict[ticker] = None
     return perf_dict
 
-# --- 1-YEAR NORMALIZED TREND CHART (BASE 100) ---
+# --- 1-YEAR NORMALIZED TREND CHART (BASE 100 - WEEKLY FREQUENCY) ---
 @st.cache_data(ttl=3600)
 def get_historical_normalized_trends(df_assets):
     series_dict = {}
@@ -147,8 +147,10 @@ def get_historical_normalized_trends(df_assets):
             hist = yf.Ticker(t).history(period="1y")
             if not hist.empty and 'Close' in hist.columns:
                 s = hist['Close'].dropna()
-                if not s.empty and s.iloc[0] > 0:
-                    s_norm = (s / s.iloc[0]) * 100
+                # Resample daily points down to 1 point per week
+                s_weekly = s.resample('W').last().dropna()
+                if not s_weekly.empty and s_weekly.iloc[0] > 0:
+                    s_norm = (s_weekly / s_weekly.iloc[0]) * 100
                     s_norm.index = s_norm.index.tz_localize(None)
                     series_dict[label] = s_norm
         except Exception:
@@ -182,7 +184,6 @@ cat_df = df.groupby('Categoria', as_index=False).agg({
 
 valore_totale = cat_df['Valore_Attuale'].sum()
 
-# Calcolo Performance 1Y Ponderata per Categoria
 def calc_cat_perf(cat_name):
     cat_rows = df[df['Categoria'] == cat_name]
     valid_rows = cat_rows.dropna(subset=['Perf_1Y_%'])
@@ -266,8 +267,8 @@ table_height = (len(display_cat) + 1) * 35 + 10
 st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table_height)
 
 # --- 1-YEAR NORMALIZED TREND CHART ---
-st.subheader("📊 1-Year Performance Comparison (Base 100)")
-st.caption("Performance relativa degli ETF/titoli nell'ultimo anno (Base 100 = 1 anno fa). Passa il mouse sopra le linee per i dettagli.")
+st.subheader("📊 1-Year Performance Comparison (Base 100 - Settimanale)")
+st.caption("Performance relativa degli ETF/titoli a frequenza settimanale (Base 100 = 1 anno fa). Passa il mouse sopra le linee per i dettagli.")
 
 with st.spinner("Caricamento performance normalizzata a 1 anno..."):
     hist_chart_df = get_historical_normalized_trends(df)
@@ -279,7 +280,7 @@ if not hist_chart_df.empty:
 
     chart = (
         alt.Chart(df_melted)
-        .mark_line()
+        .mark_line(point=True)  # Added subtle points to highlight the weekly ticks
         .encode(
             x=alt.X(f'{date_col}:T', title='Data'),
             y=alt.Y('Valore:Q', title='Performance (Base 100)', scale=alt.Scale(zero=False)),
