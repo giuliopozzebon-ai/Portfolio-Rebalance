@@ -9,7 +9,7 @@ import yfinance as yf
 # --- CONTROLLO ACCESSO CON PASSWORD ---
 def check_password():
     if "PASSWORD" not in st.secrets:
-        return True  # Se non hai impostato nessuna password nei Secrets, l'app si apre normalmente
+        return True
 
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
@@ -28,13 +28,10 @@ def check_password():
         
     return True
 
-# Blocca l'esecuzione dell'app finché la password non è corretta
 if not check_password():
     st.stop()
 # -------------------------------------
 
-
-# Page Configuration
 st.set_page_config(
     page_title="Rebalance Tracker",
     page_icon="📈",
@@ -54,7 +51,6 @@ else:
     if uploaded_file is not None:
         df = pd.read_excel(uploaded_file)
     else:
-        # Default fallback sample data
         default_data = {
             "Ticker": ["BITC.MI", "21BC.DE", "VWCE.DE", "AGGH.MI", "MANUAL"],
             "Nome Asset": ["WisdomTree Bitcoin", "21Shares Bitcoin", "Vanguard All-World", "iShares Global Aggregate", "Unlisted Bond"],
@@ -169,14 +165,13 @@ with st.spinner("Aggiornamento prezzi di mercato..."):
     live_prices = get_live_prices(tickers)
     perf_1y_dict = get_ticker_1y_performance(tickers)
 
-# Determinazione prezzo finale unità
+# Prezzi e Valore
 df['Prezzo_Live_YF'] = df['Ticker'].map(live_prices).fillna(0.0)
 df['Prezzo_Finale'] = df.apply(
     lambda row: row['Prezzo_Fisso'] if row['Prezzo_Fisso'] > 0 else row['Prezzo_Live_YF'], 
     axis=1
 )
 df['Perf_1Y_%'] = df['Ticker'].map(perf_1y_dict)
-
 df['Valore_Attuale'] = df['Quantita'] * df['Prezzo_Finale']
 
 # --- CATEGORY AGGREGATION & SORTING ---
@@ -187,17 +182,23 @@ cat_df = df.groupby('Categoria', as_index=False).agg({
 
 valore_totale = cat_df['Valore_Attuale'].sum()
 
+# Calcolo Performance 1Y Ponderata per Categoria
+def calc_cat_perf(cat_name):
+    cat_rows = df[df['Categoria'] == cat_name]
+    valid_rows = cat_rows.dropna(subset=['Perf_1Y_%'])
+    if valid_rows.empty or valid_rows['Valore_Attuale'].sum() == 0:
+        return None
+    return (valid_rows['Perf_1Y_%'] * valid_rows['Valore_Attuale']).sum() / valid_rows['Valore_Attuale'].sum()
+
+cat_df['Perf_1Y_%'] = cat_df['Categoria'].apply(calc_cat_perf)
 cat_df['Peso_Attuale_%'] = (cat_df['Valore_Attuale'] / valore_totale * 100) if valore_totale > 0 else 0
 cat_df['Scostamento_%'] = cat_df['Peso_Attuale_%'] - cat_df['Target_Pct']
 cat_df['Delta_Euro'] = valore_totale * (cat_df['Scostamento_%'] / 100)
-
-# Calcolo Variazione Relativa % al Target
 cat_df['Variazione_Relativa_%'] = cat_df.apply(
     lambda r: (r['Scostamento_%'] / r['Target_Pct'] * 100) if r['Target_Pct'] > 0 else 0.0, 
     axis=1
 )
 
-# Ordina in ordine crescente per Delta % (Scostamento_%)
 cat_df = cat_df.sort_values(by='Scostamento_%', ascending=True).reset_index(drop=True)
 
 # --- DISPLAY KPI ---
@@ -215,19 +216,21 @@ if not cat_df.empty:
         f"{most_underweight['Scostamento_%']:+.2f}%"
     )
 
-# --- CATEGORY BREAKDOWN TABLE ---
+# --- CATEGORY BREAKDOWN TABLE MAIN ---
 st.subheader("Asset Class Allocation")
 
 display_cat = cat_df.copy()
 display_cat['Valore (€)'] = display_cat['Valore_Attuale'].apply(lambda x: f"€ {x:,.2f}")
 display_cat['Peso Att.'] = display_cat['Peso_Attuale_%'].apply(lambda x: f"{x:.2f}%")
+display_cat['Perf. 12M %'] = display_cat['Perf_1Y_%'].apply(
+    lambda x: f"{x:+.2f}%" if pd.notna(x) and x is not None else "N/D"
+)
 display_cat['Delta %'] = display_cat['Scostamento_%'].apply(lambda x: f"{x:+.2f}%")
 display_cat['Var. Rel. %'] = display_cat['Variazione_Relativa_%'].apply(lambda x: f"{x:+.2f}%")
 display_cat['Delta (€)'] = display_cat['Delta_Euro'].apply(
     lambda x: f"+ € {x:,.2f}" if x > 0 else (f"- € {abs(x):,.2f}" if x < 0 else "€ 0.00")
 )
 
-# Funzione per evidenziare Delta %
 def color_delta(val):
     try:
         num = float(str(val).replace('%', '').replace('+', '').strip())
@@ -239,7 +242,6 @@ def color_delta(val):
         pass
     return ''
 
-# Funzione per evidenziare Var. Rel. % (+10% verde, -10% rosso)
 def color_var_rel(val):
     try:
         num = float(str(val).replace('%', '').replace('+', '').strip())
@@ -251,7 +253,7 @@ def color_var_rel(val):
         pass
     return ''
 
-styler = display_cat[['Categoria', 'Valore (€)', 'Peso Att.', 'Delta %', 'Var. Rel. %', 'Delta (€)']].style
+styler = display_cat[['Categoria', 'Valore (€)', 'Peso Att.', 'Perf. 12M %', 'Delta %', 'Var. Rel. %', 'Delta (€)']].style
 
 if hasattr(styler, 'map'):
     styled_cat = styler.map(color_delta, subset=['Delta %'])
@@ -265,7 +267,7 @@ st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table
 
 # --- 1-YEAR NORMALIZED TREND CHART ---
 st.subheader("📊 1-Year Performance Comparison (Base 100)")
-st.caption("Performance relativa degli ETF/titoli nell'ultimo anno (Base 100 = 1 anno fa, esclusi Bond e tit. manuali). Passa il mouse sopra le linee per i dettagli.")
+st.caption("Performance relativa degli ETF/titoli nell'ultimo anno (Base 100 = 1 anno fa). Passa il mouse sopra le linee per i dettagli.")
 
 with st.spinner("Caricamento performance normalizzata a 1 anno..."):
     hist_chart_df = get_historical_normalized_trends(df)
@@ -284,14 +286,14 @@ if not hist_chart_df.empty:
             color='Asset:N',
             tooltip=[alt.Tooltip(f'{date_col}:T', title='Data'), 'Asset:N', alt.Tooltip('Valore:Q', format='.2f', title='Base 100')]
         )
-        .configure_legend(disable=True)  # Rimuove la legenda in basso
+        .configure_legend(disable=True)
         .properties(height=500)
     )
     st.altair_chart(chart, use_container_width=True)
 else:
     st.info("Dati storici di prezzo non disponibili al momento.")
 
-# --- INTEGRATING GEMINI AI COPILOT ---
+# --- GEMINI AI COPILOT ---
 def call_gemini_copilot(summary_payload, api_key):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
     
@@ -325,7 +327,7 @@ if st.button("✨ Genera Analisi AI Ribilanciamento", type="primary"):
     api_key = st.secrets.get("GEMINI_API_KEY", "")
     
     if not api_key:
-        st.error("⚠️ Nessuna `GEMINI_API_KEY` trovata nei Secrets di Streamlit. Aggiungila nei tuoi Secrets per attivare l'AI.")
+        st.error("⚠️ Nessuna `GEMINI_API_KEY` trovata nei Secrets di Streamlit.")
     else:
         with st.spinner("Elaborazione analisi di portafoglio con Gemini..."):
             portfolio_summary = {
@@ -352,12 +354,12 @@ with st.expander("🔍 Show Detailed Holdings"):
     df_detail = df[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Prezzo_Finale', 'Valore_Attuale', 'Perf_1Y_%', 'Is_Primary']].copy()
     df_detail['Unit Price'] = df_detail['Prezzo_Finale'].apply(lambda x: f"€ {x:,.2f}")
     df_detail['Total Value'] = df_detail['Valore_Attuale'].apply(lambda x: f"€ {x:,.2f}")
-    df_detail['Perf. 1Y %'] = df_detail['Perf_1Y_%'].apply(
+    df_detail['Perf. 12M %'] = df_detail['Perf_1Y_%'].apply(
         lambda x: f"{x:+.2f}%" if pd.notna(x) and x is not None else "N/D"
     )
     
     st.dataframe(
-        df_detail[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Unit Price', 'Total Value', 'Perf. 1Y %', 'Is_Primary']], 
+        df_detail[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Unit Price', 'Total Value', 'Perf. 12M %', 'Is_Primary']], 
         hide_index=True
     )
 
