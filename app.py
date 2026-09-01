@@ -147,7 +147,6 @@ def get_historical_normalized_trends(df_assets):
             hist = yf.Ticker(t).history(period="1y")
             if not hist.empty and 'Close' in hist.columns:
                 s = hist['Close'].dropna()
-                # Resample daily points down to 1 point per week
                 s_weekly = s.resample('W').last().dropna()
                 if not s_weekly.empty and s_weekly.iloc[0] > 0:
                     s_norm = (s_weekly / s_weekly.iloc[0]) * 100
@@ -266,31 +265,46 @@ else:
 table_height = (len(display_cat) + 1) * 35 + 10
 st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table_height)
 
-# --- 1-YEAR NORMALIZED TREND CHART ---
+# --- 1-YEAR NORMALIZED TREND CHART WITH TICKER SELECTOR ---
 st.subheader("📊 1-Year Performance Comparison (Base 100 - Settimanale)")
-st.caption("Performance relativa degli ETF/titoli a frequenza settimanale (Base 100 = 1 anno fa). Passa il mouse sopra le linee per i dettagli.")
+st.caption("Performance relativa degli ETF/titoli a frequenza settimanale (Base 100 = 1 anno fa).")
 
 with st.spinner("Caricamento performance normalizzata a 1 anno..."):
     hist_chart_df = get_historical_normalized_trends(df)
 
 if not hist_chart_df.empty:
-    df_chart = hist_chart_df.reset_index()
-    date_col = df_chart.columns[0]
-    df_melted = df_chart.melt(id_vars=[date_col], var_name='Asset', value_name='Valore')
-
-    chart = (
-        alt.Chart(df_melted)
-        .mark_line(point=True)  # Added subtle points to highlight the weekly ticks
-        .encode(
-            x=alt.X(f'{date_col}:T', title='Data'),
-            y=alt.Y('Valore:Q', title='Performance (Base 100)', scale=alt.Scale(zero=False)),
-            color='Asset:N',
-            tooltip=[alt.Tooltip(f'{date_col}:T', title='Data'), 'Asset:N', alt.Tooltip('Valore:Q', format='.2f', title='Base 100')]
-        )
-        .configure_legend(disable=True)
-        .properties(height=500)
+    available_assets = list(hist_chart_df.columns)
+    
+    selected_assets = st.multiselect(
+        "Seleziona o deseleziona i titoli da visualizzare:",
+        options=available_assets,
+        default=available_assets
     )
-    st.altair_chart(chart, use_container_width=True)
+    
+    if selected_assets:
+        df_chart = hist_chart_df[selected_assets].reset_index()
+        date_col = df_chart.columns[0]
+        df_melted = df_chart.melt(id_vars=[date_col], var_name='Asset', value_name='Valore')
+
+        chart = (
+            alt.Chart(df_melted)
+            .mark_line()  # Linee senza pallini
+            .encode(
+                x=alt.X(f'{date_col}:T', title='Data'),
+                y=alt.Y('Valore:Q', title='Performance (Base 100)', scale=alt.Scale(zero=False)),
+                color='Asset:N',
+                tooltip=[
+                    alt.Tooltip(f'{date_col}:T', title='Data'),
+                    'Asset:N',
+                    alt.Tooltip('Valore:Q', format='.2f', title='Base 100')
+                ]
+            )
+            .configure_legend(disable=True)
+            .properties(height=500)
+        )
+        st.altair_chart(chart, use_container_width=True)
+    else:
+        st.warning("Seleziona almeno un titolo dal menu a tendina per mostrare il grafico.")
 else:
     st.info("Dati storici di prezzo non disponibili al momento.")
 
