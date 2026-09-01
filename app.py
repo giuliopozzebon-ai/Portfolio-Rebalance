@@ -90,7 +90,7 @@ else:
 def get_live_prices(tickers):
     prices = {}
     for ticker in tickers:
-        if not ticker or str(ticker).upper() in ["MANUAL", "NONE", "NAN", "CASH", "BOND"]:
+        if not ticker or str(ticker).upper() in ["MANUAL", "NONE", "NAN", "CASH"]:
             prices[ticker] = 0.0
             continue
         try:
@@ -110,7 +110,7 @@ def get_ticker_1y_performance(tickers):
     perf_dict = {}
     for ticker in tickers:
         t = str(ticker).strip()
-        if not t or t.upper() in ["MANUAL", "NONE", "NAN", "CASH", "BOND"] or "BOND" in t.upper():
+        if not t or t.upper() in ["MANUAL", "NONE", "NAN", "CASH"]:
             perf_dict[ticker] = None
             continue
         try:
@@ -132,12 +132,10 @@ def get_historical_normalized_trends(df_assets):
     
     for _, row in df_assets.iterrows():
         t = str(row['Ticker']).strip()
-        cat = str(row['Categoria']).strip().upper()
         
+        # Esclude solo ticker vuoti, asset manuali/cash o senza storico live
         if (not t or 
-            t.upper() in ["MANUAL", "NONE", "NAN", "CASH", "BOND"] or 
-            "BOND" in t.upper() or 
-            "BOND" in cat or 
+            t.upper() in ["MANUAL", "NONE", "NAN", "CASH"] or 
             row['Prezzo_Fisso'] > 0):
             continue
             
@@ -288,7 +286,7 @@ if not hist_chart_df.empty:
 
         chart = (
             alt.Chart(df_melted)
-            .mark_line()  # Linee senza pallini
+            .mark_line()
             .encode(
                 x=alt.X(f'{date_col}:T', title='Data'),
                 y=alt.Y('Valore:Q', title='Performance (Base 100)', scale=alt.Scale(zero=False)),
