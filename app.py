@@ -131,8 +131,6 @@ def get_historical_normalized_trends(df_assets, period="1y", group_by_category=F
     series_dict = {}
     
     if group_by_category:
-        # Calcolo andamento per categoria (media ponderata o semplice dei prezzi normalizzati)
-        cat_series = {}
         for cat, group in df_assets.groupby('Categoria'):
             cat_df_list = []
             for _, row in group.iterrows():
@@ -150,17 +148,15 @@ def get_historical_normalized_trends(df_assets, period="1y", group_by_category=F
                 except Exception:
                     pass
             if cat_df_list:
-                # Media delle performance base 100 della categoria
                 cat_combined = pd.concat(cat_df_list, axis=1).mean(axis=1)
                 series_dict[cat] = cat_combined
     else:
-        # Per singolo Ticker (Nome breve)
         for _, row in df_assets.iterrows():
             t = str(row['Ticker']).strip()
             if not t or t.upper() in ["MANUAL", "NONE", "NAN", "CASH"] or row['Prezzo_Fisso'] > 0:
                 continue
             
-            label = f"{t}"  # Ticker breve per pulizia grafica
+            label = f"{t}"
             
             try:
                 hist = yf.Ticker(t).history(period=period)
@@ -283,7 +279,7 @@ else:
 table_height = (len(display_cat) + 1) * 35 + 10
 st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table_height)
 
-# --- NORMALIZED TREND CHART IMPROVED ---
+# --- NORMALIZED TREND CHART INGRANDITO E PIÙ LEGGIBILE ---
 st.subheader("📊 Performance Comparison (Base 100)")
 
 timeframe_map = {
@@ -320,7 +316,6 @@ with st.spinner("Caricamento grafico..."):
 if not hist_chart_df.empty:
     available_items = list(hist_chart_df.columns)
     
-    # Multiselect per filtri veloci
     selected_items = st.multiselect(
         "Filtra elementi nel grafico:",
         options=available_items,
@@ -332,18 +327,36 @@ if not hist_chart_df.empty:
         date_col = df_chart.columns[0]
         df_melted = df_chart.melt(id_vars=[date_col], var_name='Serie', value_name='Valore')
 
-        # Interattività avanzata: Evidenziazione linea al passaggio del mouse
         highlight = alt.selection_point(on='pointerover', fields=['Serie'], empty=True)
 
         line_chart = (
             alt.Chart(df_melted)
-            .mark_line(strokeWidth=2.5)
+            .mark_line(strokeWidth=3)  # Tratto leggermente più spesso
             .encode(
-                x=alt.X(f'{date_col}:T', title='Data'),
-                y=alt.Y('Valore:Q', title='Performance (Base 100)', scale=alt.Scale(zero=False)),
-                color=alt.Color('Serie:N', legend=alt.Legend(title="Legenda", orient="top", columns=3)),
-                opacity=alt.condition(highlight, alt.value(1.0), alt.value(0.2)),
-                strokeWidth=alt.condition(highlight, alt.value(3.5), alt.value(1.2)),
+                x=alt.X(
+                    f'{date_col}:T', 
+                    title='Data', 
+                    axis=alt.Axis(labelFontSize=12, titleFontSize=14, labelAngle=-30)
+                ),
+                y=alt.Y(
+                    'Valore:Q', 
+                    title='Performance (Base 100)', 
+                    scale=alt.Scale(zero=False),
+                    axis=alt.Axis(labelFontSize=12, titleFontSize=14)
+                ),
+                color=alt.Color(
+                    'Serie:N', 
+                    legend=alt.Legend(
+                        title="Legenda", 
+                        orient="top", 
+                        columns=3,
+                        labelFontSize=13,
+                        titleFontSize=14,
+                        symbolSize=100
+                    )
+                ),
+                opacity=alt.condition(highlight, alt.value(1.0), alt.value(0.15)),
+                strokeWidth=alt.condition(highlight, alt.value(4.0), alt.value(1.5)),
                 tooltip=[
                     alt.Tooltip(f'{date_col}:T', title='Data', format='%d %b %Y'),
                     alt.Tooltip('Serie:N', title='Elemento'),
@@ -351,7 +364,7 @@ if not hist_chart_df.empty:
                 ]
             )
             .add_params(highlight)
-            .properties(height=450)
+            .properties(height=650)  # Ingrandito da 450px a 650px per massima visibilità
             .interactive()
         )
 
