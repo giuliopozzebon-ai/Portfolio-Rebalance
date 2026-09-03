@@ -125,32 +125,53 @@ def get_ticker_1y_performance(tickers):
             perf_dict[ticker] = None
     return perf_dict
 
-# --- NORMALIZED TREND CHART (BASE 100 - TUTTI I DATI GIORNALIERI PER PERIODO) ---
+# --- NORMALIZED TREND CHART (BASE 100) ---
 @st.cache_data(ttl=3600)
-def get_historical_normalized_trends(df_assets, period="1y"):
+def get_historical_normalized_trends(df_assets, period="1y", group_by_category=False):
     series_dict = {}
     
-    for _, row in df_assets.iterrows():
-        t = str(row['Ticker']).strip()
-        
-        if (not t or 
-            t.upper() in ["MANUAL", "NONE", "NAN", "CASH"] or 
-            row['Prezzo_Fisso'] > 0):
-            continue
+    if group_by_category:
+        # Calcolo andamento per categoria (media ponderata o semplice dei prezzi normalizzati)
+        cat_series = {}
+        for cat, group in df_assets.groupby('Categoria'):
+            cat_df_list = []
+            for _, row in group.iterrows():
+                t = str(row['Ticker']).strip()
+                if not t or t.upper() in ["MANUAL", "NONE", "NAN", "CASH"] or row['Prezzo_Fisso'] > 0:
+                    continue
+                try:
+                    hist = yf.Ticker(t).history(period=period)
+                    if not hist.empty and 'Close' in hist.columns:
+                        s = hist['Close'].dropna()
+                        if not s.empty and s.iloc[0] > 0:
+                            s_norm = (s / s.iloc[0]) * 100
+                            s_norm.index = s_norm.index.tz_localize(None)
+                            cat_df_list.append(s_norm)
+                except Exception:
+                    pass
+            if cat_df_list:
+                # Media delle performance base 100 della categoria
+                cat_combined = pd.concat(cat_df_list, axis=1).mean(axis=1)
+                series_dict[cat] = cat_combined
+    else:
+        # Per singolo Ticker (Nome breve)
+        for _, row in df_assets.iterrows():
+            t = str(row['Ticker']).strip()
+            if not t or t.upper() in ["MANUAL", "NONE", "NAN", "CASH"] or row['Prezzo_Fisso'] > 0:
+                continue
             
-        label = f"{row['Nome Asset']} ({t})"
-        
-        try:
-            hist = yf.Ticker(t).history(period=period)
-            if not hist.empty and 'Close' in hist.columns:
-                s = hist['Close'].dropna()
-                # Utilizziamo tutti i dati giornalieri senza resampling settimanale
-                if not s.empty and s.iloc[0] > 0:
-                    s_norm = (s / s.iloc[0]) * 100
-                    s_norm.index = s_norm.index.tz_localize(None)
-                    series_dict[label] = s_norm
-        except Exception:
-            pass
+            label = f"{t}"  # Ticker breve per pulizia grafica
+            
+            try:
+                hist = yf.Ticker(t).history(period=period)
+                if not hist.empty and 'Close' in hist.columns:
+                    s = hist['Close'].dropna()
+                    if not s.empty and s.iloc[0] > 0:
+                        s_norm = (s / s.iloc[0]) * 100
+                        s_norm.index = s_norm.index.tz_localize(None)
+                        series_dict[label] = s_norm
+            except Exception:
+                pass
                 
     if not series_dict:
         return pd.DataFrame()
@@ -262,11 +283,9 @@ else:
 table_height = (len(display_cat) + 1) * 35 + 10
 st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table_height)
 
-# --- NORMALIZED TREND CHART WITH TIMEFRAME & TICKER SELECTORS ---
+# --- NORMALIZED TREND CHART IMPROVED ---
 st.subheader("📊 Performance Comparison (Base 100)")
-st.caption("Performance relativa degli ETF/titoli (Base 100 all'inizio del periodo selezionato).")
 
-# Mappatura periodi per yfinance
 timeframe_map = {
     "1 mese": "1mo",
     "3 mesi": "3mo",
@@ -276,54 +295,71 @@ timeframe_map = {
     "5 anni": "5y"
 }
 
-col_tf, _ = st.columns([1, 1])
+col_mode, col_tf = st.columns([1, 1])
+
+with col_mode:
+    view_mode = st.radio(
+        "Raggruppamento:",
+        options=["Per Categoria", "Per Singolo Ticker"],
+        horizontal=True
+    )
+
 with col_tf:
     selected_tf_label = st.selectbox(
-        "Seleziona l'intervallo temporale:",
+        "Orizzonte temporale:",
         options=list(timeframe_map.keys()),
-        index=3  # Default su "1 anno"
+        index=3
     )
 
 selected_period = timeframe_map[selected_tf_label]
+is_cat_view = (view_mode == "Per Categoria")
 
-with st.spinner("Caricamento performance storiche..."):
-    hist_chart_df = get_historical_normalized_trends(df, period=selected_period)
+with st.spinner("Caricamento grafico..."):
+    hist_chart_df = get_historical_normalized_trends(df, period=selected_period, group_by_category=is_cat_view)
 
 if not hist_chart_df.empty:
-    available_assets = list(hist_chart_df.columns)
+    available_items = list(hist_chart_df.columns)
     
-    selected_assets = st.multiselect(
-        "Seleziona o deseleziona i titoli da visualizzare:",
-        options=available_assets,
-        default=available_assets
+    # Multiselect per filtri veloci
+    selected_items = st.multiselect(
+        "Filtra elementi nel grafico:",
+        options=available_items,
+        default=available_items
     )
     
-    if selected_assets:
-        df_chart = hist_chart_df[selected_assets].reset_index()
+    if selected_items:
+        df_chart = hist_chart_df[selected_items].reset_index()
         date_col = df_chart.columns[0]
-        df_melted = df_chart.melt(id_vars=[date_col], var_name='Asset', value_name='Valore')
+        df_melted = df_chart.melt(id_vars=[date_col], var_name='Serie', value_name='Valore')
 
-        chart = (
+        # Interattività avanzata: Evidenziazione linea al passaggio del mouse
+        highlight = alt.selection_point(on='pointerover', fields=['Serie'], empty=True)
+
+        line_chart = (
             alt.Chart(df_melted)
-            .mark_line()
+            .mark_line(strokeWidth=2.5)
             .encode(
                 x=alt.X(f'{date_col}:T', title='Data'),
                 y=alt.Y('Valore:Q', title='Performance (Base 100)', scale=alt.Scale(zero=False)),
-                color='Asset:N',
+                color=alt.Color('Serie:N', legend=alt.Legend(title="Legenda", orient="top", columns=3)),
+                opacity=alt.condition(highlight, alt.value(1.0), alt.value(0.2)),
+                strokeWidth=alt.condition(highlight, alt.value(3.5), alt.value(1.2)),
                 tooltip=[
-                    alt.Tooltip(f'{date_col}:T', title='Data', format='%Y-%m-%d'),
-                    'Asset:N',
+                    alt.Tooltip(f'{date_col}:T', title='Data', format='%d %b %Y'),
+                    alt.Tooltip('Serie:N', title='Elemento'),
                     alt.Tooltip('Valore:Q', format='.2f', title='Base 100')
                 ]
             )
-            .configure_legend(disable=True)
-            .properties(height=500)
+            .add_params(highlight)
+            .properties(height=450)
+            .interactive()
         )
-        st.altair_chart(chart, use_container_width=True)
+
+        st.altair_chart(line_chart, use_container_width=True)
     else:
-        st.warning("Seleziona almeno un titolo dal menu a tendina per mostrare il grafico.")
+        st.warning("Seleziona almeno un elemento per mostrare il grafico.")
 else:
-    st.info("Dati storici di prezzo non disponibili per l'intervallo selezionato.")
+    st.info("Dati storici non disponibili.")
 
 # --- GEMINI AI COPILOT ---
 def call_gemini_copilot(summary_payload, api_key):
