@@ -125,15 +125,14 @@ def get_ticker_1y_performance(tickers):
             perf_dict[ticker] = None
     return perf_dict
 
-# --- 1-YEAR NORMALIZED TREND CHART (BASE 100 - WEEKLY FREQUENCY) ---
+# --- NORMALIZED TREND CHART (BASE 100 - TUTTI I DATI GIORNALIERI PER PERIODO) ---
 @st.cache_data(ttl=3600)
-def get_historical_normalized_trends(df_assets):
+def get_historical_normalized_trends(df_assets, period="1y"):
     series_dict = {}
     
     for _, row in df_assets.iterrows():
         t = str(row['Ticker']).strip()
         
-        # Esclude solo ticker vuoti, asset manuali/cash o senza storico live
         if (not t or 
             t.upper() in ["MANUAL", "NONE", "NAN", "CASH"] or 
             row['Prezzo_Fisso'] > 0):
@@ -142,12 +141,12 @@ def get_historical_normalized_trends(df_assets):
         label = f"{row['Nome Asset']} ({t})"
         
         try:
-            hist = yf.Ticker(t).history(period="1y")
+            hist = yf.Ticker(t).history(period=period)
             if not hist.empty and 'Close' in hist.columns:
                 s = hist['Close'].dropna()
-                s_weekly = s.resample('W').last().dropna()
-                if not s_weekly.empty and s_weekly.iloc[0] > 0:
-                    s_norm = (s_weekly / s_weekly.iloc[0]) * 100
+                # Utilizziamo tutti i dati giornalieri senza resampling settimanale
+                if not s.empty and s.iloc[0] > 0:
+                    s_norm = (s / s.iloc[0]) * 100
                     s_norm.index = s_norm.index.tz_localize(None)
                     series_dict[label] = s_norm
         except Exception:
@@ -263,12 +262,32 @@ else:
 table_height = (len(display_cat) + 1) * 35 + 10
 st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table_height)
 
-# --- 1-YEAR NORMALIZED TREND CHART WITH TICKER SELECTOR ---
-st.subheader("📊 1-Year Performance Comparison (Base 100 - Settimanale)")
-st.caption("Performance relativa degli ETF/titoli a frequenza settimanale (Base 100 = 1 anno fa).")
+# --- NORMALIZED TREND CHART WITH TIMEFRAME & TICKER SELECTORS ---
+st.subheader("📊 Performance Comparison (Base 100)")
+st.caption("Performance relativa degli ETF/titoli (Base 100 all'inizio del periodo selezionato).")
 
-with st.spinner("Caricamento performance normalizzata a 1 anno..."):
-    hist_chart_df = get_historical_normalized_trends(df)
+# Mappatura periodi per yfinance
+timeframe_map = {
+    "1 mese": "1mo",
+    "3 mesi": "3mo",
+    "6 mesi": "6mo",
+    "1 anno": "1y",
+    "3 anni": "3y",
+    "5 anni": "5y"
+}
+
+col_tf, _ = st.columns([1, 1])
+with col_tf:
+    selected_tf_label = st.selectbox(
+        "Seleziona l'intervallo temporale:",
+        options=list(timeframe_map.keys()),
+        index=3  # Default su "1 anno"
+    )
+
+selected_period = timeframe_map[selected_tf_label]
+
+with st.spinner("Caricamento performance storiche..."):
+    hist_chart_df = get_historical_normalized_trends(df, period=selected_period)
 
 if not hist_chart_df.empty:
     available_assets = list(hist_chart_df.columns)
@@ -292,7 +311,7 @@ if not hist_chart_df.empty:
                 y=alt.Y('Valore:Q', title='Performance (Base 100)', scale=alt.Scale(zero=False)),
                 color='Asset:N',
                 tooltip=[
-                    alt.Tooltip(f'{date_col}:T', title='Data'),
+                    alt.Tooltip(f'{date_col}:T', title='Data', format='%Y-%m-%d'),
                     'Asset:N',
                     alt.Tooltip('Valore:Q', format='.2f', title='Base 100')
                 ]
@@ -304,7 +323,7 @@ if not hist_chart_df.empty:
     else:
         st.warning("Seleziona almeno un titolo dal menu a tendina per mostrare il grafico.")
 else:
-    st.info("Dati storici di prezzo non disponibili al momento.")
+    st.info("Dati storici di prezzo non disponibili per l'intervallo selezionato.")
 
 # --- GEMINI AI COPILOT ---
 def call_gemini_copilot(summary_payload, api_key):
