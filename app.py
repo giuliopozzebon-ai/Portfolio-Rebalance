@@ -85,6 +85,18 @@ if "Prezzo_Fisso" not in df.columns:
 else:
     df["Prezzo_Fisso"] = pd.to_numeric(df["Prezzo_Fisso"], errors="coerce").fillna(0.0)
 
+
+
+st.caption("Manual Data Refresh:")
+if st.button("🔄 Refresh Live Prices"):
+    st.cache_data.clear()
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        st.experimental_rerun()
+
+
+
 # --- LIVE PRICES & MANUAL PRICE OVERRIDE ---
 @st.cache_data(ttl=300)
 def get_live_prices(tickers):
@@ -443,11 +455,3 @@ with st.expander("🔍 Show Detailed Holdings"):
         df_detail[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Unit Price', 'Total Value', 'Perf. 12M %', 'Is_Primary']], 
         hide_index=True
     )
-
-st.caption("Manual Data Refresh:")
-if st.button("🔄 Refresh Live Prices"):
-    st.cache_data.clear()
-    if hasattr(st, "rerun"):
-        st.rerun()
-    else:
-        st.experimental_rerun()
