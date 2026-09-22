@@ -328,6 +328,7 @@ st.caption("Ripartizione geografica automatica della componente azionaria (aggio
 
 usa_eur, europe_eur, em_eur, other_eur = 0.0, 0.0, 0.0, 0.0
 total_equity_eur = 0.0
+equity_ticker_geo = {}
 
 for _, row in df.iterrows():
     t = row['Ticker']
@@ -343,6 +344,14 @@ for _, row in df.iterrows():
         europe_eur += val * (geo_profile["Europa"] / 100.0)
         em_eur += val * (geo_profile["Emergenti"] / 100.0)
         other_eur += val * (geo_profile["Altro"] / 100.0)
+        
+        ticker_lbl = str(t).strip() if pd.notna(t) and str(t).upper() not in ["MANUAL", "NONE", "NAN"] else str(name).strip()
+        equity_ticker_geo[ticker_lbl] = {
+            "USA": geo_profile["USA"],
+            "Europa": geo_profile["Europa"],
+            "Emergenti": geo_profile["Emergenti"],
+            "Altro": geo_profile["Altro"]
+        }
 
 if total_equity_eur > 0:
     pct_usa = (usa_eur / total_equity_eur) * 100.0
@@ -403,6 +412,23 @@ if total_equity_eur > 0:
         .properties(height=320)
     )
     st.altair_chart(donut_chart, use_container_width=True)
+
+    # Tabella Esposizione Geografica per Ticker Azionario
+    st.markdown("**Dettaglio Esposizione Geografica per Ticker Azionario:**")
+    regions_map = {
+        "USA": "🇺🇸 Stati Uniti (USA)",
+        "Europa": "🇪🇺 Europa",
+        "Emergenti": "🌏 Mercati Emergenti",
+        "Altro": "🌐 Altro / Resto del Mondo"
+    }
+    table_geo_data = {}
+    for reg_key, reg_name in regions_map.items():
+        table_geo_data[reg_name] = {}
+        for ticker_lbl, exp in equity_ticker_geo.items():
+            table_geo_data[reg_name][ticker_lbl] = f"{exp[reg_key]:.1f}%"
+
+    df_geo_table = pd.DataFrame(table_geo_data).T
+    st.dataframe(df_geo_table, use_container_width=True)
 
 else:
     st.info("Nessun titolo azionario rilevato nel portafoglio per il calcolo geografico.")
