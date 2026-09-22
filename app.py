@@ -52,13 +52,13 @@ else:
         df = pd.read_excel(uploaded_file)
     else:
         default_data = {
-            "Ticker": ["BITC.MI", "21BC.DE", "VWCE.DE", "AVWS.DE", "EIMI.MI", "AGGH.MI", "MANUAL"],
-            "Nome Asset": ["WisdomTree Bitcoin", "21Shares Bitcoin", "Vanguard All-World", "Avantis Small Cap Value", "iShares MSCI EM IMI", "iShares Global Aggregate", "Unlisted Bond"],
-            "Categoria": ["Bitcoin", "Bitcoin", "Azioni Globali", "Azioni Globali", "Azioni Emergenti", "Obbligazionario", "Obbligazionario"],
-            "Quantita": [30, 50, 250, 100, 500, 1800, 1],
-            "Target_Pct": [5.0, 5.0, 40.0, 10.0, 10.0, 15.0, 15.0],
-            "Is_Primary": [False, True, True, True, True, True, True],
-            "Prezzo_Fisso": [None, None, None, None, None, None, 20000.0]
+            "Ticker": ["BITC.MI", "21BC.DE", "SWDA.MI", "EXUS.MI", "IWQU.MI", "IWMO.MI", "IWVL.MI", "AVWS.DE", "EIMI.MI", "AGGH.MI", "MANUAL"],
+            "Nome Asset": ["WisdomTree Bitcoin", "21Shares Bitcoin", "iShares Core MSCI World", "Amundi MSCI World Ex-USA", "iShares MSCI World Quality", "iShares MSCI World Momentum", "iShares MSCI World Value", "Avantis Small Cap Value", "iShares MSCI EM IMI", "iShares Global Aggregate", "Unlisted Bond"],
+            "Categoria": ["Bitcoin", "Bitcoin", "Azioni Globali", "Azioni Ex-USA", "Azioni Quality", "Azioni Momentum", "Azioni Value", "Azioni Small Cap", "Azioni Emergenti", "Obbligazionario", "Obbligazionario"],
+            "Quantita": [30, 50, 200, 150, 100, 100, 100, 100, 400, 1800, 1],
+            "Target_Pct": [5.0, 5.0, 25.0, 15.0, 10.0, 10.0, 10.0, 5.0, 5.0, 5.0, 5.0],
+            "Is_Primary": [False, True, True, True, True, True, True, True, True, True, True],
+            "Prezzo_Fisso": [None, None, None, None, None, None, None, None, None, None, 20000.0]
         }
         df = pd.DataFrame(default_data)
 
@@ -125,13 +125,9 @@ def get_ticker_1y_performance(tickers):
             perf_dict[ticker] = None
     return perf_dict
 
-# --- MAPPATURA ESPOSIZIONE GEOGRAFICA ROBUSTA (CACHE 30 GIORNI) ---
+# --- MAPPATURA ESPOSIZIONE GEOGRAFICA E PAESI SPECIFICI ---
 @st.cache_data(ttl=30 * 86400)
 def get_etf_geographic_exposure(ticker_str, asset_name, category_name):
-    """
-    Classifica automaticamente qualsiasi asset azionario in base a Ticker, Nome e Categoria.
-    Memorizzata in cache per 30 giorni.
-    """
     t = str(ticker_str).upper().strip()
     cat = str(category_name).upper().strip()
     name = str(asset_name).upper().strip()
@@ -139,32 +135,138 @@ def get_etf_geographic_exposure(ticker_str, asset_name, category_name):
     # 1. Esclusione asset non azionari
     non_equity_keywords = ["OBBLIGAZIONARIO", "BOND", "BITCOIN", "CRYPTO", "LIQUIDITA", "CASH", "FUTURES", "COMMODITY", "GOLD", "ORO"]
     if any(k in cat for k in non_equity_keywords):
-        return {"USA": 0.0, "Europa": 0.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": False}
+        return {"Is_Equity": False}
 
     # 2. Verifica se è azionario
     equity_keywords = [
         "AZION", "AZIONI", "AZIONARIO", "EQUITY", "STOCK", "STOXX", "MSCI",
         "EMERGENTI", "EMERGING", "WORLD", "S&P", "NASDAQ", "SMALL CAP", "VALUE",
-        "GLOBAL", "USA", "EUROPE", "EUROPA", "JAPAN", "PACIFIC", "CHINA"
+        "QUALITY", "MOMENTUM", "FACTOR", "GLOBAL", "USA", "EXUS", "EX-USA", "EUROPE", "EUROPA"
     ]
     is_eq = any(k in cat or k in name or k in t for k in equity_keywords)
     if not is_eq:
-        return {"USA": 0.0, "Europa": 0.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": False}
+        return {"Is_Equity": False}
 
-    # 3. Mappatura pesi geografici per tipologia di indice/benchmark
-    if "S&P" in name or "NASDAQ" in name or "S&P" in t or "USA" in name or "AZIONI USA" in cat or "USA" in t:
-        return {"USA": 100.0, "Europa": 0.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": True}
-    elif "EMERGING" in name or "EMEI" in t or "EIMI" in t or "EMXC" in t or "EMERGENTI" in cat or "EMERGENTI" in name:
-        return {"USA": 0.0, "Europa": 0.0, "Emergenti": 100.0, "Altro": 0.0, "Is_Equity": True}
-    elif "EUROPE" in name or "EUROPA" in name or "EXSA" in t or "MEUD" in t or "STX" in t:
-        return {"USA": 0.0, "Europa": 100.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": True}
+    # Struttura dati per i paesi specifici
+    countries = {
+        "Stati Uniti": 0.0,
+        "Giappone": 0.0,
+        "Regno Unito": 0.0,
+        "Francia": 0.0,
+        "Germania": 0.0,
+        "Svizzera": 0.0,
+        "Canada": 0.0,
+        "Cina": 0.0,
+        "India": 0.0,
+        "Taiwan": 0.0,
+        "Corea del Sud": 0.0,
+        "Altri Paesi": 0.0
+    }
+
+    # 3. Mappatura specifica per tipologia di benchmark/ticker/fattore
+
+    # --- WORLD EX-USA (es. EXUS) ---
+    if "EXUS" in t or "EX-USA" in name or "EX USA" in name or "EX-USA" in t:
+        usa, europa, emergenti, altro = 0.0, 48.0, 0.0, 52.0
+        countries.update({
+            "Stati Uniti": 0.0, "Giappone": 21.5, "Regno Unito": 13.0,
+            "Francia": 10.0, "Svizzera": 9.5, "Germania": 8.0,
+            "Canada": 8.0, "Altri Paesi": 30.0
+        })
+
+    # --- USA ONLY (S&P 500, Nasdaq, MSCI USA) ---
+    elif "S&P" in name or "NASDAQ" in name or ("USA" in name and "EX" not in name) or ("USA" in t and "EX" not in t) or "AZIONI USA" in cat:
+        usa, europa, emergenti, altro = 100.0, 0.0, 0.0, 0.0
+        countries["Stati Uniti"] = 100.0
+
+    # --- QUALITY FACTOR (es. IWQU, XDEQ) ---
+    elif "QUALITY" in name or "IWQU" in t or "QUAL" in name:
+        usa, europa, emergenti, altro = 71.0, 18.0, 0.0, 11.0
+        countries.update({
+            "Stati Uniti": 71.0, "Svizzera": 7.5, "Regno Unito": 5.0,
+            "Giappone": 4.0, "Francia": 3.0, "Altri Paesi": 9.5
+        })
+
+    # --- MOMENTUM FACTOR (es. IWMO, XMOM) ---
+    elif "MOMENTUM" in name or "IWMO" in t or "MOM" in name:
+        usa, europa, emergenti, altro = 68.0, 15.0, 0.0, 17.0
+        countries.update({
+            "Stati Uniti": 68.0, "Giappone": 7.0, "Regno Unito": 4.0,
+            "Francia": 3.5, "Svizzera": 3.0, "Germania": 2.5, "Altri Paesi": 12.0
+        })
+
+    # --- VALUE FACTOR (es. IWVL, XDEV) ---
+    elif "VALUE" in name or "IWVL" in t or "VAL" in name:
+        usa, europa, emergenti, altro = 42.0, 24.0, 0.0, 34.0
+        countries.update({
+            "Stati Uniti": 42.0, "Giappone": 22.0, "Regno Unito": 8.0,
+            "Francia": 6.0, "Germania": 5.0, "Altri Paesi": 17.0
+        })
+
+    # --- GLOBAL SMALL CAP / VALUE (es. AVWS) ---
     elif "AVWS" in t or ("SMALL CAP" in name and "USA" not in name):
-        return {"USA": 55.0, "Europa": 20.0, "Emergenti": 5.0, "Altro": 20.0, "Is_Equity": True}
-    elif "WORLD" in t or "WORLD" in name or "VWCE" in t or "SWDA" in t or "IWDA" in t or "GLOBAL" in name or "GLOBALI" in cat or "GLOBALE" in cat:
-        return {"USA": 61.5, "Europa": 16.0, "Emergenti": 9.5, "Altro": 13.0, "Is_Equity": True}
+        usa, europa, emergenti, altro = 55.0, 20.0, 5.0, 20.0
+        countries.update({
+            "Stati Uniti": 55.0, "Giappone": 11.0, "Regno Unito": 7.0,
+            "Francia": 4.0, "Germania": 3.5, "Canada": 3.5, "Altri Paesi": 16.0
+        })
 
-    # Fallback predefinito per qualsiasi altro titolo azionario
-    return {"USA": 60.0, "Europa": 20.0, "Emergenti": 10.0, "Altro": 10.0, "Is_Equity": True}
+    # --- EMERGING MARKETS EX-CHINA (es. EMXC) ---
+    elif "EMXC" in t or "EX CHINA" in name or "EX-CHINA" in name:
+        usa, europa, emergenti, altro = 0.0, 0.0, 100.0, 0.0
+        countries.update({
+            "India": 26.0, "Taiwan": 24.0, "Corea del Sud": 15.0,
+            "Brasile": 6.0, "Altri Paesi": 29.0
+        })
+
+    # --- EMERGING MARKETS CORE (es. EIMI, EMAE) ---
+    elif "EMERGING" in name or "EMERGENTI" in cat or "EIMI" in t or "EMAE" in t:
+        usa, europa, emergenti, altro = 0.0, 0.0, 100.0, 0.0
+        countries.update({
+            "Cina": 24.0, "India": 19.0, "Taiwan": 18.0,
+            "Corea del Sud": 11.0, "Altri Paesi": 28.0
+        })
+
+    # --- EUROPE ONLY (es. MEUD, EXSA, Stoxx 600) ---
+    elif "EUROPE" in name or "EUROPA" in name or "MEUD" in t or "EXSA" in t or "STOXX" in name:
+        usa, europa, emergenti, altro = 0.0, 100.0, 0.0, 0.0
+        countries.update({
+            "Regno Unito": 22.0, "Francia": 18.0, "Svizzera": 15.0,
+            "Germania": 13.0, "Altri Paesi": 32.0
+        })
+
+    # --- WORLD CORE STANDARD (es. SWDA, VWCE, IWDA) ---
+    elif "WORLD" in t or "WORLD" in name or "SWDA" in t or "VWCE" in t or "IWDA" in t or "GLOBAL" in name or "GLOBALI" in cat:
+        if "VWCE" in t or "ALL-WORLD" in name or "FTSE ALL" in name:
+            usa, europa, emergenti, altro = 61.5, 16.0, 9.5, 13.0
+            countries.update({
+                "Stati Uniti": 61.5, "Giappone": 5.8, "Regno Unito": 3.6,
+                "Francia": 3.0, "Svizzera": 2.8, "Canada": 3.1,
+                "Cina": 2.5, "India": 2.0, "Taiwan": 1.8, "Altri Paesi": 13.9
+            })
+        else: # MSCI World Standard (SWDA, IWDA)
+            usa, europa, emergenti, altro = 68.0, 17.0, 0.0, 15.0
+            countries.update({
+                "Stati Uniti": 68.0, "Giappone": 6.2, "Regno Unito": 3.8,
+                "Francia": 3.2, "Svizzera": 3.0, "Canada": 3.3, "Germania": 2.2, "Altri Paesi": 10.3
+            })
+
+    # Fallback generico per azionario non mappato espressamente
+    else:
+        usa, europa, emergenti, altro = 60.0, 20.0, 10.0, 10.0
+        countries.update({
+            "Stati Uniti": 60.0, "Giappone": 5.0, "Regno Unito": 4.0,
+            "Francia": 3.0, "Germania": 3.0, "Altri Paesi": 25.0
+        })
+
+    return {
+        "USA": usa,
+        "Europa": europa,
+        "Emergenti": emergenti,
+        "Altro": altro,
+        "Countries": countries,
+        "Is_Equity": True
+    }
 
 # --- NORMALIZED TREND CHART (BASE 100) ---
 @st.cache_data(ttl=3600)
@@ -338,7 +440,7 @@ for _, row in df.iterrows():
     
     geo_profile = get_etf_geographic_exposure(t, name, cat)
         
-    if geo_profile["Is_Equity"] and val > 0:
+    if geo_profile.get("Is_Equity") and val > 0:
         total_equity_eur += val
         usa_eur += val * (geo_profile["USA"] / 100.0)
         europe_eur += val * (geo_profile["Europa"] / 100.0)
@@ -350,7 +452,8 @@ for _, row in df.iterrows():
             "USA": geo_profile["USA"],
             "Europa": geo_profile["Europa"],
             "Emergenti": geo_profile["Emergenti"],
-            "Altro": geo_profile["Altro"]
+            "Altro": geo_profile["Altro"],
+            "Countries": geo_profile.get("Countries", {})
         }
 
 if total_equity_eur > 0:
@@ -413,19 +516,37 @@ if total_equity_eur > 0:
     )
     st.altair_chart(donut_chart, use_container_width=True)
 
-    # Tabella Esposizione Geografica per Ticker Azionario
-    st.markdown("**Dettaglio Esposizione Geografica per Ticker Azionario:**")
-    regions_map = {
-        "USA": "🇺🇸 Stati Uniti (USA)",
-        "Europa": "🇪🇺 Europa",
-        "Emergenti": "🌏 Mercati Emergenti",
-        "Altro": "🌐 Altro / Resto del Mondo"
-    }
+    # Tabella Esposizione Geografica Dettagliata (Macrocategorie + Singoli Paesi)
+    st.markdown("**Dettaglio Esposizione Geografica e Paesi per Ticker Azionario:**")
+    
+    rows_structure = [
+        ("MACRO: USA", "USA", "🇺🇸 Stati Uniti (USA)"),
+        ("MACRO: Europa", "Europa", "🇪🇺 Europa"),
+        ("MACRO: Emergenti", "Emergenti", "🌏 Mercati Emergenti"),
+        ("MACRO: Altro", "Altro", "🌐 Altro / Resto del Mondo"),
+        ("COUNTRY", "Stati Uniti", "  🇺🇸 Stati Uniti"),
+        ("COUNTRY", "Giappone", "  🇯🇵 Giappone"),
+        ("COUNTRY", "Regno Unito", "  🇬🇧 Regno Unito"),
+        ("COUNTRY", "Francia", "  🇫🇷 Francia"),
+        ("COUNTRY", "Germania", "  🇩🇪 Germania"),
+        ("COUNTRY", "Svizzera", "  🇨🇭 Svizzera"),
+        ("COUNTRY", "Canada", "  🇨🇦 Canada"),
+        ("COUNTRY", "Cina", "  🇨🇳 Cina"),
+        ("COUNTRY", "India", "  🇮🇳 India"),
+        ("COUNTRY", "Taiwan", "  🇹🇼 Taiwan"),
+        ("COUNTRY", "Corea del Sud", "  🇰🇷 Corea del Sud"),
+        ("COUNTRY", "Altri Paesi", "  🌐 Altri Paesi")
+    ]
+
     table_geo_data = {}
-    for reg_key, reg_name in regions_map.items():
-        table_geo_data[reg_name] = {}
+    for r_type, key_name, display_label in rows_structure:
+        table_geo_data[display_label] = {}
         for ticker_lbl, exp in equity_ticker_geo.items():
-            table_geo_data[reg_name][ticker_lbl] = f"{exp[reg_key]:.1f}%"
+            if r_type.startswith("MACRO"):
+                val_pct = exp.get(key_name, 0.0)
+            else:
+                val_pct = exp.get("Countries", {}).get(key_name, 0.0)
+            table_geo_data[display_label][ticker_lbl] = f"{val_pct:.1f}%"
 
     df_geo_table = pd.DataFrame(table_geo_data).T
     st.dataframe(df_geo_table, use_container_width=True)
