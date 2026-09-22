@@ -52,13 +52,13 @@ else:
         df = pd.read_excel(uploaded_file)
     else:
         default_data = {
-            "Ticker": ["BITC.MI", "21BC.DE", "VWCE.DE", "AGGH.MI", "MANUAL"],
-            "Nome Asset": ["WisdomTree Bitcoin", "21Shares Bitcoin", "Vanguard All-World", "iShares Global Aggregate", "Unlisted Bond"],
-            "Categoria": ["Bitcoin", "Bitcoin", "Azionario Globale", "Obbligazionario", "Obbligazionario"],
-            "Quantita": [30, 50, 250, 1800, 1],
-            "Target_Pct": [5.0, 5.0, 50.0, 20.0, 20.0],
-            "Is_Primary": [False, True, True, True, True],
-            "Prezzo_Fisso": [None, None, None, None, 20000.0]
+            "Ticker": ["BITC.MI", "21BC.DE", "VWCE.DE", "AVWS.DE", "EIMI.MI", "AGGH.MI", "MANUAL"],
+            "Nome Asset": ["WisdomTree Bitcoin", "21Shares Bitcoin", "Vanguard All-World", "Avantis Small Cap Value", "iShares MSCI EM IMI", "iShares Global Aggregate", "Unlisted Bond"],
+            "Categoria": ["Bitcoin", "Bitcoin", "Azionario Globale", "Azionario Globale", "Emergenti", "Obbligazionario", "Obbligazionario"],
+            "Quantita": [30, 50, 250, 100, 500, 1800, 1],
+            "Target_Pct": [5.0, 5.0, 40.0, 10.0, 10.0, 15.0, 15.0],
+            "Is_Primary": [False, True, True, True, True, True, True],
+            "Prezzo_Fisso": [None, None, None, None, None, None, 20000.0]
         }
         df = pd.DataFrame(default_data)
 
@@ -84,18 +84,6 @@ if "Prezzo_Fisso" not in df.columns:
     df["Prezzo_Fisso"] = 0.0
 else:
     df["Prezzo_Fisso"] = pd.to_numeric(df["Prezzo_Fisso"], errors="coerce").fillna(0.0)
-
-
-
-st.caption("Manual Data Refresh:")
-if st.button("🔄 Refresh Live Prices"):
-    st.cache_data.clear()
-    if hasattr(st, "rerun"):
-        st.rerun()
-    else:
-        st.experimental_rerun()
-
-
 
 # --- LIVE PRICES & MANUAL PRICE OVERRIDE ---
 @st.cache_data(ttl=300)
@@ -136,6 +124,56 @@ def get_ticker_1y_performance(tickers):
         except Exception:
             perf_dict[ticker] = None
     return perf_dict
+
+# --- MAPPATURA ESPOSIZIONE GEOGRAFICA (CACHE 30 GIORNI / 1 MESE) ---
+@st.cache_data(ttl=30 * 86400)
+def get_etf_geographic_exposure(ticker_str, asset_name, category_name):
+    """
+    Ritorna la ripartizione % in (USA, Europa, Emergenti, Altro).
+    Memorizzata in cache per 30 giorni (1 mese).
+    """
+    t = str(ticker_str).upper().strip()
+    cat = str(category_name).upper().strip()
+    name = str(asset_name).upper().strip()
+
+    # Se non è un titolo azionario (es. Bond, Crypto, Cash, Futures), restituisce 0%
+    if any(k in cat for k in ["OBBLIGAZIONARIO", "BOND", "BITCOIN", "CRYPTO", "LIQUIDITA", "CASH", "FUTURES"]):
+        return {"USA": 0.0, "Europa": 0.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": False}
+
+    # Tentativo di recupero tramite yfinance fund breakdown se disponibile
+    if t not in ["MANUAL", "NONE", "NAN", "CASH", ""]:
+        try:
+            yf_obj = yf.Ticker(t)
+            funds_data = getattr(yf_obj, "funds_data", None)
+            if funds_data and hasattr(funds_data, "country_holdings"):
+                countries = funds_data.country_holdings
+                if isinstance(countries, dict) and len(countries) > 0:
+                    usa = float(countries.get("us", countries.get("united_states", 0.0))) * 100
+                    eu_keys = ["uk", "united_kingdom", "france", "germany", "switzerland", "netherlands", "italy", "spain", "sweden"]
+                    em_keys = ["china", "india", "taiwan", "brazil", "south_korea", "south_africa"]
+                    
+                    europa = sum(float(countries.get(k, 0.0)) for k in eu_keys) * 100
+                    emergenti = sum(float(countries.get(k, 0.0)) for k in em_keys) * 100
+                    altro = max(0.0, 100.0 - (usa + europa + emergenti))
+                    return {"USA": usa, "Europa": europa, "Emergenti": emergenti, "Altro": altro, "Is_Equity": True}
+        except Exception:
+            pass
+
+    # Profilazione automatica basata sui Benchmark standard per ETF UCITS / Globali
+    if "WORLD" in t or "WORLD" in name or "VWCE" in t or "SWDA" in t or "IWDA" in t:
+        return {"USA": 61.5, "Europa": 16.0, "Emergenti": 9.5, "Altro": 13.0, "Is_Equity": True}
+    elif "AVWS" in t or "SMALL CAP" in name:
+        return {"USA": 55.0, "Europa": 20.0, "Emergenti": 5.0, "Altro": 20.0, "Is_Equity": True}
+    elif "S&P" in name or "NASDAQ" in name or "USA" in name or "US " in name:
+        return {"USA": 100.0, "Europa": 0.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": True}
+    elif "EMERGING" in name or "EMEI" in t or "EIMI" in t or "EMXC" in t or "EMERGENTI" in cat:
+        return {"USA": 0.0, "Europa": 0.0, "Emergenti": 100.0, "Altro": 0.0, "Is_Equity": True}
+    elif "EUROPE" in name or "EURO" in name or "EXSA" in t or "MEUD" in t:
+        return {"USA": 0.0, "Europa": 100.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": True}
+    elif "AZIONARIO" in cat or "EQUITY" in cat or "STOCK" in cat:
+        return {"USA": 60.0, "Europa": 20.0, "Emergenti": 10.0, "Altro": 10.0, "Is_Equity": True}
+
+    return {"USA": 0.0, "Europa": 0.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": False}
 
 # --- NORMALIZED TREND CHART (BASE 100) ---
 @st.cache_data(ttl=3600)
@@ -291,7 +329,96 @@ else:
 table_height = (len(display_cat) + 1) * 35 + 10
 st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table_height)
 
+
+# --- 🌍 ANALISI GEOGRAFICA COMPONENTE AZIONARIA (CAP USA <= 50%) ---
+st.divider()
+st.subheader("🌍 Geographic Breakdown (Solo Azionario)")
+st.caption("Analisi della ripartizione geografica della componente azionaria (aggiornata mensilmente). Target Max USA = 50%.")
+
+usa_eur, europe_eur, em_eur, other_eur = 0.0, 0.0, 0.0, 0.0
+total_equity_eur = 0.0
+
+for _, row in df.iterrows():
+    t = row['Ticker']
+    val = float(row['Valore_Attuale'])
+    cat = row['Categoria']
+    name = row['Nome Asset']
+    
+    geo_profile = get_etf_geographic_exposure(t, name, cat)
+        
+    if geo_profile["Is_Equity"] and val > 0:
+        total_equity_eur += val
+        usa_eur += val * (geo_profile["USA"] / 100.0)
+        europe_eur += val * (geo_profile["Europa"] / 100.0)
+        em_eur += val * (geo_profile["Emergenti"] / 100.0)
+        other_eur += val * (geo_profile["Altro"] / 100.0)
+
+if total_equity_eur > 0:
+    pct_usa = (usa_eur / total_equity_eur) * 100.0
+    pct_europe = (europe_eur / total_equity_eur) * 100.0
+    pct_em = (em_eur / total_equity_eur) * 100.0
+    pct_other = (other_eur / total_equity_eur) * 100.0
+
+    # KPI USA vs Cap 50%
+    col_g1, col_g2 = st.columns(2)
+    col_g1.metric("Valore Azionario Totale", f"€ {total_equity_eur:,.2f}")
+    col_g2.metric(
+        "Esposizione USA", 
+        f"{pct_usa:.1f}%", 
+        delta=f"{pct_usa - 50.0:+.1f}% vs limite 50%",
+        delta_color="inverse"
+    )
+
+    # Allerta Visivo Ribilanciamento USA
+    if pct_usa > 50.0:
+        eccedenza_pct = pct_usa - 50.0
+        eccedenza_eur = total_equity_eur * (eccedenza_pct / 100.0)
+        st.warning(
+            f"⚠️ **USA sopra il limite massimo (50%)!**\n\n"
+            f"Attualmente gli USA rappresentano il **{pct_usa:.1f}%** dell'azionario (€ {usa_eur:,.2f}). "
+            f"L'eccedenza è pari a **+{eccedenza_pct:.1f}%** (€ {eccedenza_eur:,.2f}). "
+            f"Indirizza i prossimi acquisti azionari su ETF Ex-USA (Europa/Emergenti)."
+        )
+    else:
+        st.success(
+            f"✅ **Esposizione USA perfettamente nei limiti.**\n\n"
+            f"La quota USA è al **{pct_usa:.1f}%** dell'azionario (sotto il limite massimo del 50%)."
+        )
+
+    # Grafico a Torta / Ciambella per le Macro Aree Geografiche
+    geo_df = pd.DataFrame({
+        "Regione": ["🇺🇸 Stati Uniti (USA)", "🇪🇺 Europa", "🌏 Mercati Emergenti", "🌐 Altro / Resto del Mondo"],
+        "Valore_EUR": [usa_eur, europe_eur, em_eur, other_eur],
+        "Quota_Pct": [pct_usa, pct_europe, pct_em, pct_other]
+    })
+
+    donut_chart = (
+        alt.Chart(geo_df)
+        .mark_arc(innerRadius=65, stroke="#ffffff", strokeWidth=2)
+        .encode(
+            theta=alt.Theta(field="Valore_EUR", type="quantitative"),
+            color=alt.Color(
+                field="Regione", 
+                type="nominal",
+                scale=alt.Scale(range=["#1f77b4", "#2ca02c", "#ff7f0e", "#7f7f7f"]),
+                legend=alt.Legend(title="Macrocategoria", orient="right", labelFontSize=12, titleFontSize=13)
+            ),
+            tooltip=[
+                alt.Tooltip("Regione:N", title="Macrocategoria"),
+                alt.Tooltip("Valore_EUR:Q", format=",.2f", title="Valore (€)"),
+                alt.Tooltip("Quota_Pct:Q", format=".1f", title="Quota Azionario (%)")
+            ]
+        )
+        .properties(height=320)
+    )
+    st.altair_chart(donut_chart, use_container_width=True)
+
+else:
+    st.info("Nessun titolo azionario rilevato nel portafoglio per il calcolo geografico.")
+
+
 # --- NORMALIZED TREND CHART INGRANDITO E PIÙ LEGGIBILE ---
+st.divider()
 st.subheader("📊 Performance Comparison (Base 100)")
 
 timeframe_map = {
@@ -343,7 +470,7 @@ if not hist_chart_df.empty:
 
         line_chart = (
             alt.Chart(df_melted)
-            .mark_line(strokeWidth=3)  # Tratto leggermente più spesso
+            .mark_line(strokeWidth=3)
             .encode(
                 x=alt.X(
                     f'{date_col}:T', 
@@ -376,7 +503,7 @@ if not hist_chart_df.empty:
                 ]
             )
             .add_params(highlight)
-            .properties(height=650)  # Ingrandito da 450px a 650px per massima visibilità
+            .properties(height=650)
             .interactive()
         )
 
@@ -400,7 +527,7 @@ def call_gemini_copilot(summary_payload, api_key):
     Organizza la risposta in 3 paragrafi concisi:
     1. **Sentiment di mercato**: Fammi un'analisi di mercato sintentica ad oggi con il sentiment di mercato per ciascun asset class, non basato sui pesi del mio portafoglio, ma in generale
     2. **News**: dammi le news più importanti che possono impattare il mio portafoglio
-    3. **Suggerimenti tattici**: dammi 2-3 suggerimenti tattici che possono essere utili, legati ai pesi attuali del mio portafoglio, ma senza porre il focus sugli scostamenti attuali che sono già evidenti
+    3. **Suggerimenti tattici**: dammi 2-3 suggerimenti tattici che possono essere utili, legati ai pesi attuali del mio portafoglio e al bilanciamento geografico azionario, ma senza porre il focus sugli scostamenti attuali che sono già evidenti
     """
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -425,6 +552,8 @@ if st.button("✨ Genera Analisi AI Ribilanciamento", type="primary"):
         with st.spinner("Elaborazione analisi di portafoglio con Gemini..."):
             portfolio_summary = {
                 "valore_totale_eur": round(valore_totale, 2),
+                "valore_azionario_totale_eur": round(total_equity_eur, 2),
+                "esposizione_usa_pct_azionario": round(pct_usa if total_equity_eur > 0 else 0.0, 2),
                 "asset_classes": []
             }
             for idx, row in cat_df.iterrows():
@@ -455,3 +584,11 @@ with st.expander("🔍 Show Detailed Holdings"):
         df_detail[['Ticker', 'Nome Asset', 'Categoria', 'Quantita', 'Unit Price', 'Total Value', 'Perf. 12M %', 'Is_Primary']], 
         hide_index=True
     )
+
+st.caption("Manual Data Refresh:")
+if st.button("🔄 Refresh Live Prices"):
+    st.cache_data.clear()
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        st.experimental_rerun()
