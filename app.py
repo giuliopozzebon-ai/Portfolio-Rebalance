@@ -54,7 +54,7 @@ else:
         default_data = {
             "Ticker": ["BITC.MI", "21BC.DE", "VWCE.DE", "AVWS.DE", "EIMI.MI", "AGGH.MI", "MANUAL"],
             "Nome Asset": ["WisdomTree Bitcoin", "21Shares Bitcoin", "Vanguard All-World", "Avantis Small Cap Value", "iShares MSCI EM IMI", "iShares Global Aggregate", "Unlisted Bond"],
-            "Categoria": ["Bitcoin", "Bitcoin", "Azionario Globale", "Azionario Globale", "Emergenti", "Obbligazionario", "Obbligazionario"],
+            "Categoria": ["Bitcoin", "Bitcoin", "Azioni Globali", "Azioni Globali", "Azioni Emergenti", "Obbligazionario", "Obbligazionario"],
             "Quantita": [30, 50, 250, 100, 500, 1800, 1],
             "Target_Pct": [5.0, 5.0, 40.0, 10.0, 10.0, 15.0, 15.0],
             "Is_Primary": [False, True, True, True, True, True, True],
@@ -125,55 +125,46 @@ def get_ticker_1y_performance(tickers):
             perf_dict[ticker] = None
     return perf_dict
 
-# --- MAPPATURA ESPOSIZIONE GEOGRAFICA (CACHE 30 GIORNI / 1 MESE) ---
+# --- MAPPATURA ESPOSIZIONE GEOGRAFICA ROBUSTA (CACHE 30 GIORNI) ---
 @st.cache_data(ttl=30 * 86400)
 def get_etf_geographic_exposure(ticker_str, asset_name, category_name):
     """
-    Ritorna la ripartizione % in (USA, Europa, Emergenti, Altro).
-    Memorizzata in cache per 30 giorni (1 mese).
+    Classifica automaticamente qualsiasi asset azionario in base a Ticker, Nome e Categoria.
+    Memorizzata in cache per 30 giorni.
     """
     t = str(ticker_str).upper().strip()
     cat = str(category_name).upper().strip()
     name = str(asset_name).upper().strip()
 
-    # Se non è un titolo azionario (es. Bond, Crypto, Cash, Futures), restituisce 0%
-    if any(k in cat for k in ["OBBLIGAZIONARIO", "BOND", "BITCOIN", "CRYPTO", "LIQUIDITA", "CASH", "FUTURES"]):
+    # 1. Esclusione asset non azionari
+    non_equity_keywords = ["OBBLIGAZIONARIO", "BOND", "BITCOIN", "CRYPTO", "LIQUIDITA", "CASH", "FUTURES", "COMMODITY", "GOLD", "ORO"]
+    if any(k in cat for k in non_equity_keywords):
         return {"USA": 0.0, "Europa": 0.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": False}
 
-    # Tentativo di recupero tramite yfinance fund breakdown se disponibile
-    if t not in ["MANUAL", "NONE", "NAN", "CASH", ""]:
-        try:
-            yf_obj = yf.Ticker(t)
-            funds_data = getattr(yf_obj, "funds_data", None)
-            if funds_data and hasattr(funds_data, "country_holdings"):
-                countries = funds_data.country_holdings
-                if isinstance(countries, dict) and len(countries) > 0:
-                    usa = float(countries.get("us", countries.get("united_states", 0.0))) * 100
-                    eu_keys = ["uk", "united_kingdom", "france", "germany", "switzerland", "netherlands", "italy", "spain", "sweden"]
-                    em_keys = ["china", "india", "taiwan", "brazil", "south_korea", "south_africa"]
-                    
-                    europa = sum(float(countries.get(k, 0.0)) for k in eu_keys) * 100
-                    emergenti = sum(float(countries.get(k, 0.0)) for k in em_keys) * 100
-                    altro = max(0.0, 100.0 - (usa + europa + emergenti))
-                    return {"USA": usa, "Europa": europa, "Emergenti": emergenti, "Altro": altro, "Is_Equity": True}
-        except Exception:
-            pass
+    # 2. Verifica se è azionario
+    equity_keywords = [
+        "AZION", "AZIONI", "AZIONARIO", "EQUITY", "STOCK", "STOXX", "MSCI",
+        "EMERGENTI", "EMERGING", "WORLD", "S&P", "NASDAQ", "SMALL CAP", "VALUE",
+        "GLOBAL", "USA", "EUROPE", "EUROPA", "JAPAN", "PACIFIC", "CHINA"
+    ]
+    is_eq = any(k in cat or k in name or k in t for k in equity_keywords)
+    if not is_eq:
+        return {"USA": 0.0, "Europa": 0.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": False}
 
-    # Profilazione automatica basata sui Benchmark standard per ETF UCITS / Globali
-    if "WORLD" in t or "WORLD" in name or "VWCE" in t or "SWDA" in t or "IWDA" in t:
-        return {"USA": 61.5, "Europa": 16.0, "Emergenti": 9.5, "Altro": 13.0, "Is_Equity": True}
-    elif "AVWS" in t or "SMALL CAP" in name:
-        return {"USA": 55.0, "Europa": 20.0, "Emergenti": 5.0, "Altro": 20.0, "Is_Equity": True}
-    elif "S&P" in name or "NASDAQ" in name or "USA" in name or "US " in name:
+    # 3. Mappatura pesi geografici per tipologia di indice/benchmark
+    if "S&P" in name or "NASDAQ" in name or "S&P" in t or "USA" in name or "AZIONI USA" in cat or "USA" in t:
         return {"USA": 100.0, "Europa": 0.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": True}
-    elif "EMERGING" in name or "EMEI" in t or "EIMI" in t or "EMXC" in t or "EMERGENTI" in cat:
+    elif "EMERGING" in name or "EMEI" in t or "EIMI" in t or "EMXC" in t or "EMERGENTI" in cat or "EMERGENTI" in name:
         return {"USA": 0.0, "Europa": 0.0, "Emergenti": 100.0, "Altro": 0.0, "Is_Equity": True}
-    elif "EUROPE" in name or "EURO" in name or "EXSA" in t or "MEUD" in t:
+    elif "EUROPE" in name or "EUROPA" in name or "EXSA" in t or "MEUD" in t or "STX" in t:
         return {"USA": 0.0, "Europa": 100.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": True}
-    elif "AZIONARIO" in cat or "EQUITY" in cat or "STOCK" in cat:
-        return {"USA": 60.0, "Europa": 20.0, "Emergenti": 10.0, "Altro": 10.0, "Is_Equity": True}
+    elif "AVWS" in t or ("SMALL CAP" in name and "USA" not in name):
+        return {"USA": 55.0, "Europa": 20.0, "Emergenti": 5.0, "Altro": 20.0, "Is_Equity": True}
+    elif "WORLD" in t or "WORLD" in name or "VWCE" in t or "SWDA" in t or "IWDA" in t or "GLOBAL" in name or "GLOBALI" in cat or "GLOBALE" in cat:
+        return {"USA": 61.5, "Europa": 16.0, "Emergenti": 9.5, "Altro": 13.0, "Is_Equity": True}
 
-    return {"USA": 0.0, "Europa": 0.0, "Emergenti": 0.0, "Altro": 0.0, "Is_Equity": False}
+    # Fallback predefinito per qualsiasi altro titolo azionario
+    return {"USA": 60.0, "Europa": 20.0, "Emergenti": 10.0, "Altro": 10.0, "Is_Equity": True}
 
 # --- NORMALIZED TREND CHART (BASE 100) ---
 @st.cache_data(ttl=3600)
@@ -333,7 +324,7 @@ st.dataframe(styled_cat, use_container_width=True, hide_index=True, height=table
 # --- 🌍 ANALISI GEOGRAFICA COMPONENTE AZIONARIA (CAP USA <= 50%) ---
 st.divider()
 st.subheader("🌍 Geographic Breakdown (Solo Azionario)")
-st.caption("Analisi della ripartizione geografica della componente azionaria (aggiornata mensilmente). Target Max USA = 50%.")
+st.caption("Ripartizione geografica automatica della componente azionaria (aggiornata mensilmente). Target Max USA = 50%.")
 
 usa_eur, europe_eur, em_eur, other_eur = 0.0, 0.0, 0.0, 0.0
 total_equity_eur = 0.0
